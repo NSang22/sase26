@@ -6,7 +6,7 @@
 
 ## 1. Concept
 
-A gamified co-working web app where two users join a synchronized 3D study room. Browser-based AI tracks each user's focus via webcam. Pets react to your behavior in real time — and optionally, real SOL is at stake. Surprise quizzes generated from uploaded study materials keep you honest. Persistent accounts mean your pet levels up across sessions.
+A gamified co-working web app where up to four users join a synchronized 3D study room. Browser-based AI tracks each user's focus via webcam. Pets react to your behavior in real time — and optionally, real SOL is at stake. Surprise quizzes generated from uploaded study materials keep you honest. Persistent accounts mean your pet levels up across sessions.
 
 ---
 
@@ -48,8 +48,8 @@ The original problem: why does anyone care if a virtual pet falls asleep?
 
 **Answer: three layers of stakes.**
 
-1. **Social pressure.** Your distraction affects your *partner's* pet, not just yours. If you zone out, their pet loses energy or gets sad. You're not letting yourself down — you're screwing someone else over.
-2. **Real money (optional).** In "Locked In" mode, both players escrow SOL. The winner (focus % + quiz accuracy) takes the pot. Every glance at your phone is money walking away.
+1. **Social pressure.** Your distraction affects other players' pets, not just yours. If you zone out, their pets lose energy or get sad. You're not letting yourself down — you're impacting the whole room.
+2. **Real money (optional).** In "Locked In" mode, up to 4 players escrow SOL. The winner (focus % + quiz accuracy) takes the pot. Every glance at your phone is money walking away.
 3. **Persistent progression.** Your pet levels up across sessions. Focus streaks unlock cosmetics, new pet species, titles. You've invested hours into this pet — you're not going to let it down now.
 
 ### 4.2 Focus Tracking (MediaPipe)
@@ -64,7 +64,7 @@ The original problem: why does anyone care if a virtual pet falls asleep?
 Each pet has three animation states:
 - **Working:** Happily studying, small idle movements.
 - **Idle:** Neutral, waiting.
-- **Distracted/Sleeping:** Triggered when owner loses focus. Visible to both players.
+- **Distracted/Sleeping:** Triggered when owner loses focus. visible to all players.
 
 **Progression (persisted via MongoDB):**
 - Pets earn XP from focus time and quiz performance.
@@ -86,7 +86,7 @@ Each pet has three animation states:
 - **Source:** Host uploads a PDF or text study guide during the waiting room phase. Parsed server-side via `pdf-parse`.
 - **Generation:** Gemini 1.5 Flash generates multiple-choice quiz JSON from the extracted text. Pre-generate a bank of 10-15 questions at session start, don't call the API mid-session.
 - **Trigger:** Server emits a quiz event every 5-10 minutes (randomized interval).
-- **UX:** 2D overlay on the 3D scene. Both users answer the same question simultaneously. Pet reads the question aloud via ElevenLabs.
+- **UX:** 2D overlay on the 3D scene. All players answer the same question simultaneously. Pet reads the question aloud via ElevenLabs.
 - **Scoring:** Correct answer + speed bonus. Results factor into final session score.
 
 ### 4.5 Solana Betting
@@ -96,16 +96,16 @@ Each pet has three animation states:
 | Mode | Description |
 |---|---|
 | **Casual** | No wallet needed. Points are just points. Full functionality minus the money. |
-| **Locked In** | Both players connect Phantom wallets and stake SOL into an escrow program. |
+| **Locked In** | Up to 4 players connect Phantom wallets and stake SOL into an escrow program. |
 
 **Betting flow:**
 1. Host creates room and sets stake amount (e.g., 0.1 SOL).
-2. Both players connect Phantom wallets in the waiting room.
-3. Both send SOL to a server-controlled wallet. Session cannot start until both transactions confirm.
+2. Up to 4 players connect Phantom wallets in the waiting room.
+3. All players send SOL to a server-controlled wallet. Session cannot start until all transactions confirm.
 4. During session, staked amount is visible on screen at all times.
 5. On session end, server calculates winner via weighted score: `0.8 * focus_percentage + 0.2 * quiz_accuracy`. Focus is the core metric — quizzes are bonus reinforcement, not the main event.
 6. Server sends funds from the held wallet to the winner's address.
-7. Ties → funds returned to both.
+7. Ties -> funds returned to all tied players (or split evenly by rule).
 
 **Note:** This is a server-managed escrow (centralized). Production version would use an Anchor on-chain program for trustless resolution. For a hackathon MVP, the demo is identical and saves hours of Rust development.
 
@@ -131,8 +131,8 @@ Each pet has three animation states:
 
 ### 5.2 Waiting Room
 1. Host uploads study material (PDF/text).
-2. Both players ready up.
-3. If "Locked In" mode: both connect Phantom wallets and approve escrow.
+2. Up to 4 players ready up.
+3. If "Locked In" mode: all players connect Phantom wallets and approve escrow.
 4. System pre-generates quiz bank from uploaded material (Gemini).
 5. System pre-generates voice lines for quiz questions (ElevenLabs).
 
@@ -142,10 +142,10 @@ Each pet has three animation states:
 3. Timer starts. Pets begin in "Working" state.
 4. Focus tracking runs continuously. State changes sync via Socket.io.
 5. Quizzes fire every 5-10 minutes. Pet reads question aloud.
-6. Points accumulate in real time, visible to both players.
+6. Points accumulate in real time, visible to all players.
 
 ### 5.4 Session End
-1. Timer expires or both players end manually.
+1. Timer expires or all players end manually.
 2. Recap screen: focus time %, quiz accuracy, total points.
 3. If betting: escrow resolves, funds transfer shown on screen.
 4. XP awarded, pet progression updated in MongoDB.
@@ -185,7 +185,7 @@ Each pet has three animation states:
 | Asset | Source | Notes |
 |---|---|---|
 | Pet models (.glb) | Custom (Blender) | 2-3 species, 3 animation clips each |
-| Room/desk model (.glb) | Custom (Blender) or Poly.pizza | Cozy, two-seat setup |
+| Room/desk model (.glb) | Custom (Blender) or Poly.pizza | Cozy, up to four-seat setup |
 | Pet voice lines | ElevenLabs API | ~15-20 clips per species, pre-generated |
 | Quiz audio | ElevenLabs API | Generated per session from quiz text |
 
@@ -193,11 +193,11 @@ Each pet has three animation states:
 
 ## 8. Demo Script (3-Minute Pitch)
 
-**[0:00-0:30] Hook.** "What if studying actually had consequences? Meet Buddy." Show the landing page. Two users join a room.
+**[0:00-0:30] Hook.** "What if studying actually had consequences? Meet Buddy." Show the landing page. Up to 4 users join a room.
 
-**[0:30-1:00] The Core Loop.** Show the 3D room, two pets studying. One player looks away — their partner's pet reacts, the voice line fires. "Your focus doesn't just affect you — it affects your partner."
+**[0:30-1:00] The Core Loop.** Show the 3D room, up to four pets studying. One player looks away -> other players' pets react, the voice line fires. "Your focus doesn't just affect you -> it affects the whole room."
 
-**[1:00-1:30] Quizzes.** A surprise quiz pops up. The pet reads it aloud. Both players answer. Points update live.
+**[1:00-1:30] Quizzes.** A surprise quiz pops up. The pet reads it aloud. All players answer. Points update live.
 
 **[1:30-2:00] The Stakes.** "But what if the stakes were real?" Show Phantom wallet connect. Show the escrow. "Now every distraction costs you money."
 
@@ -217,3 +217,4 @@ Each pet has three animation states:
 | ElevenLabs rate limits | Pre-generate all voice lines during waiting room phase. Cache aggressively. |
 | Two-laptop demo failure | Support same-machine demo: two browser tabs, one with webcam, one simulated. |
 | MongoDB connection issues | Pre-seed data locally. Have a local fallback or show screenshots of leaderboard if Atlas is down. |
+
