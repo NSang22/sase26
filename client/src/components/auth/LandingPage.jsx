@@ -213,8 +213,7 @@ export default function BuddyLockIn() {
   const [roomCode, setRoomCode] = useState("");
   const [joinCode, setJoinCode] = useState("");
   const [hoveredBtn, setHoveredBtn] = useState(null);
-  const [showTransition, setShowTransition] = useState(false);
-  const [transitionProgress, setTransitionProgress] = useState(0);
+  const [transitionPhase, setTransitionPhase] = useState("idle"); // idle | closing | pokeball | opening
   const [selectedPokemon, setSelectedPokemon] = useState(null);
   const [players, setPlayers] = useState([]);
   const [username, setUsername] = useState("");
@@ -361,32 +360,19 @@ export default function BuddyLockIn() {
     return () => cancelAnimationFrame(animId);
   }, []);
 
-  // Battle transition effect
+  // Pokeball battle transition: circle wipe close → pokeball → circle wipe open
   const triggerTransition = (targetScreen) => {
-    setShowTransition(true);
-    setTransitionProgress(0);
-
-    let progress = 0;
-    const interval = setInterval(() => {
-      progress += 0.04;
-      setTransitionProgress(progress);
-      if (progress >= 1) {
-        clearInterval(interval);
-        setScreen(targetScreen);
+    setTransitionPhase("closing"); // clip-path animates from 150% → 0% over 300ms
+    setTimeout(() => {
+      setTransitionPhase("pokeball"); // fully closed; change screen now
+      setScreen(targetScreen);
+      setTimeout(() => {
+        setTransitionPhase("opening"); // clip-path animates from 0% → 150% over 300ms
         setTimeout(() => {
-          let fadeOut = 1;
-          const fadeInterval = setInterval(() => {
-            fadeOut -= 0.04;
-            setTransitionProgress(fadeOut);
-            if (fadeOut <= 0) {
-              clearInterval(fadeInterval);
-              setShowTransition(false);
-              setTransitionProgress(0);
-            }
-          }, 16);
-        }, 200);
-      }
-    }, 16);
+          setTransitionPhase("idle");
+        }, 300);
+      }, 300);
+    }, 300);
   };
 
   const handleMakeRoom = () => {
@@ -403,80 +389,6 @@ export default function BuddyLockIn() {
     triggerTransition("session");
   };
 
-  // Pokeball transition overlay
-  const TransitionOverlay = () => {
-    if (!showTransition) return null;
-    const p = transitionProgress;
-    const size = Math.max(window.innerWidth, window.innerHeight) * 2;
-    const clipSize = p <= 0.5 ? (p / 0.5) * size : ((1 - p) / 0.5) * size;
-
-    return (
-      <div
-        style={{
-          position: "fixed",
-          inset: 0,
-          zIndex: 9999,
-          backgroundColor: "#0A0A2E",
-          clipPath:
-            p <= 0.5
-              ? `circle(${clipSize}px at 50% 50%)`
-              : `circle(${clipSize + size}px at 50% 50%)`,
-          opacity: p <= 0.5 ? p * 2 : (1 - p) * 2,
-          pointerEvents: "none",
-        }}
-      >
-        <div
-          style={{
-            position: "absolute",
-            top: "50%",
-            left: "50%",
-            transform: "translate(-50%, -50%)",
-            width: 60,
-            height: 60,
-          }}
-        >
-          {/* Pokeball */}
-          <div
-            style={{
-              width: 60,
-              height: 30,
-              backgroundColor: "#E85050",
-              borderRadius: "30px 30px 0 0",
-            }}
-          />
-          <div
-            style={{
-              width: 60,
-              height: 4,
-              backgroundColor: "#282828",
-              position: "relative",
-            }}
-          >
-            <div
-              style={{
-                position: "absolute",
-                width: 16,
-                height: 16,
-                borderRadius: "50%",
-                backgroundColor: "#F8F8F8",
-                border: "3px solid #282828",
-                top: -6,
-                left: 19,
-              }}
-            />
-          </div>
-          <div
-            style={{
-              width: 60,
-              height: 30,
-              backgroundColor: "#F8F8F8",
-              borderRadius: "0 0 30px 30px",
-            }}
-          />
-        </div>
-      </div>
-    );
-  };
 
   // Shared pixel button style
   const PixelButton = ({ children, onClick, color, hoverColor, glowColor, id, big, style: extraStyle }) => {
@@ -537,8 +449,8 @@ export default function BuddyLockIn() {
       let animId;
 
       const draw = () => {
-        ctx.clearRect(0, 0, 80, 80);
-        drawPixelPokemon(ctx, 16, 20, type, frame++, 2.5);
+        ctx.clearRect(0, 0, 64, 64);
+        drawPixelPokemon(ctx, 10, 14, type, frame++, 2);
         animId = requestAnimationFrame(draw);
       };
       draw();
@@ -550,10 +462,10 @@ export default function BuddyLockIn() {
         onClick={onClick}
         ref={cardRef}
         style={{
-          width: 90,
+          width: 72,
           textAlign: "center",
           cursor: "pointer",
-          padding: "10px 8px",
+          padding: "6px 4px",
           borderRadius: 8,
           border: isSelected ? `2px solid ${p.color}` : "2px solid rgba(255,255,255,0.1)",
           backgroundColor: isSelected ? `${p.color}22` : "rgba(255,255,255,0.03)",
@@ -563,9 +475,9 @@ export default function BuddyLockIn() {
       >
         <canvas
           ref={miniCanvasRef}
-          width={80}
-          height={80}
-          style={{ width: 80, height: 80, imageRendering: "pixelated" }}
+          width={64}
+          height={64}
+          style={{ width: 64, height: 64, imageRendering: "pixelated" }}
         />
         <div
           style={{
@@ -612,10 +524,80 @@ export default function BuddyLockIn() {
         }}
       />
 
-      {/* Transition overlay */}
-      <TransitionOverlay />
+      {/* Pokeball transition — dark backdrop */}
+      {transitionPhase === "pokeball" && (
+        <div
+          style={{
+            position: "fixed",
+            inset: 0,
+            zIndex: 9998,
+            backgroundColor: "#0A0A2E",
+            pointerEvents: "none",
+          }}
+        />
+      )}
 
-      {/* UI Layer */}
+      {/* Pokeball transition — pokeball icon */}
+      {transitionPhase === "pokeball" && (
+        <div
+          style={{
+            position: "fixed",
+            inset: 0,
+            zIndex: 9999,
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            pointerEvents: "none",
+          }}
+        >
+          <div style={{ width: 80, height: 80, position: "relative" }}>
+            {/* Top red half */}
+            <div
+              style={{
+                width: 80,
+                height: 40,
+                backgroundColor: "#E85050",
+                borderRadius: "40px 40px 0 0",
+              }}
+            />
+            {/* Black center band */}
+            <div
+              style={{
+                width: 80,
+                height: 6,
+                backgroundColor: "#282828",
+                position: "relative",
+              }}
+            >
+              {/* Center button */}
+              <div
+                style={{
+                  position: "absolute",
+                  width: 22,
+                  height: 22,
+                  borderRadius: "50%",
+                  backgroundColor: "#F8F8F8",
+                  border: "4px solid #282828",
+                  top: -8,
+                  left: "50%",
+                  transform: "translateX(-50%)",
+                }}
+              />
+            </div>
+            {/* Bottom white half */}
+            <div
+              style={{
+                width: 80,
+                height: 40,
+                backgroundColor: "#F8F8F8",
+                borderRadius: "0 0 40px 40px",
+              }}
+            />
+          </div>
+        </div>
+      )}
+
+      {/* UI Layer — clip-path drives the circle wipe animation */}
       <div
         style={{
           position: "relative",
@@ -626,6 +608,14 @@ export default function BuddyLockIn() {
           flexDirection: "column",
           alignItems: "center",
           justifyContent: "center",
+          clipPath:
+            transitionPhase === "closing" || transitionPhase === "pokeball"
+              ? "circle(0% at 50% 50%)"
+              : "circle(150% at 50% 50%)",
+          transition:
+            transitionPhase === "closing" || transitionPhase === "opening"
+              ? "clip-path 300ms linear"
+              : "none",
         }}
       >
         {screen === "landing" && (
@@ -724,15 +714,17 @@ export default function BuddyLockIn() {
               display: "flex",
               flexDirection: "column",
               alignItems: "center",
-              gap: 20,
+              gap: 12,
               animation: "fadeInUp 0.4s ease-out",
               backgroundColor: "rgba(10,10,46,0.85)",
-              padding: "32px 48px",
+              padding: "20px 32px",
               borderRadius: 12,
               border: "2px solid rgba(248,208,48,0.2)",
               boxShadow: "0 0 40px rgba(0,0,0,0.5)",
               backdropFilter: "blur(8px)",
               maxWidth: 500,
+              maxHeight: "85vh",
+              overflowY: "auto",
             }}
           >
             <h2
@@ -832,12 +824,12 @@ export default function BuddyLockIn() {
                 fontFamily: "'Press Start 2P', monospace",
                 fontSize: 8,
                 color: "#E85050",
-                margin: "8px 0 0 0",
+                margin: "2px 0 0 0",
               }}
             >
               CHOOSE YOUR BUDDY
             </p>
-            <div style={{ display: "flex", gap: 8, flexWrap: "wrap", justifyContent: "center" }}>
+            <div style={{ display: "flex", gap: 6, flexWrap: "wrap", justifyContent: "center" }}>
               {Object.keys(POKEMON_SPRITES).map((type) => (
                 <PokemonCard
                   key={type}
@@ -849,7 +841,7 @@ export default function BuddyLockIn() {
             </div>
 
             {/* Players in room */}
-            <div style={{ marginTop: 8, width: "100%" }}>
+            <div style={{ marginTop: 4, width: "100%" }}>
               <p
                 style={{
                   fontFamily: "'Press Start 2P', monospace",
@@ -908,7 +900,7 @@ export default function BuddyLockIn() {
             </div>
 
             {/* Action buttons */}
-            <div style={{ display: "flex", gap: 16, marginTop: 8 }}>
+            <div style={{ display: "flex", gap: 16, marginTop: 4 }}>
               <PixelButton
                 id="back1"
                 onClick={() => triggerTransition("landing")}
@@ -937,15 +929,17 @@ export default function BuddyLockIn() {
               display: "flex",
               flexDirection: "column",
               alignItems: "center",
-              gap: 20,
+              gap: 12,
               animation: "fadeInUp 0.4s ease-out",
               backgroundColor: "rgba(10,10,46,0.85)",
-              padding: "32px 48px",
+              padding: "20px 32px",
               borderRadius: 12,
               border: "2px solid rgba(88,168,232,0.2)",
               boxShadow: "0 0 40px rgba(0,0,0,0.5)",
               backdropFilter: "blur(8px)",
-              maxWidth: 440,
+              maxWidth: 500,
+              maxHeight: "85vh",
+              overflowY: "auto",
             }}
           >
             <h2
@@ -1010,12 +1004,12 @@ export default function BuddyLockIn() {
                 fontFamily: "'Press Start 2P', monospace",
                 fontSize: 8,
                 color: "#E85050",
-                margin: "4px 0 0 0",
+                margin: "2px 0 0 0",
               }}
             >
               CHOOSE YOUR BUDDY
             </p>
-            <div style={{ display: "flex", gap: 8, flexWrap: "wrap", justifyContent: "center" }}>
+            <div style={{ display: "flex", gap: 6, flexWrap: "wrap", justifyContent: "center" }}>
               {Object.keys(POKEMON_SPRITES).map((type) => (
                 <PokemonCard
                   key={type}
@@ -1027,7 +1021,7 @@ export default function BuddyLockIn() {
             </div>
 
             {/* Action buttons */}
-            <div style={{ display: "flex", gap: 16, marginTop: 8 }}>
+            <div style={{ display: "flex", gap: 16, marginTop: 4 }}>
               <PixelButton
                 id="back2"
                 onClick={() => triggerTransition("landing")}
