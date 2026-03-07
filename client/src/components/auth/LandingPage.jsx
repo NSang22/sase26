@@ -218,6 +218,7 @@ export default function BuddyLockIn() {
   const [selectedPokemon, setSelectedPokemon] = useState(null);
   const [players, setPlayers] = useState([]);
   const [username, setUsername] = useState("");
+  const [copied, setCopied] = useState(false);
 
   // Generate room code
   const generateCode = useCallback(() => {
@@ -753,6 +754,9 @@ export default function BuddyLockIn() {
                 padding: "16px 32px",
                 borderRadius: 8,
                 border: "2px dashed rgba(248,208,48,0.4)",
+                display: "flex",
+                alignItems: "center",
+                gap: 12,
               }}
             >
               <p
@@ -767,6 +771,28 @@ export default function BuddyLockIn() {
               >
                 {roomCode}
               </p>
+              <button
+                onClick={() => {
+                  navigator.clipboard.writeText(roomCode);
+                  setCopied(true);
+                  setTimeout(() => setCopied(false), 1500);
+                }}
+                style={{
+                  fontFamily: "'Press Start 2P', monospace",
+                  fontSize: 12,
+                  padding: "6px 16px",
+                  background: copied ? "#F8D030" : "#222",
+                  color: copied ? "#222" : "#F8D030",
+                  border: "2px solid #F8D030",
+                  borderRadius: 6,
+                  cursor: "pointer",
+                  outline: "none",
+                  boxShadow: "0 0 6px #F8D030",
+                  transition: "background 0.2s, color 0.2s",
+                }}
+              >
+                {copied ? "Copied!" : "Copy"}
+              </button>
             </div>
             <p
               style={{
