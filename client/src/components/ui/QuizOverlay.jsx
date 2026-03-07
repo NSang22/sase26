@@ -67,10 +67,12 @@ const s = {
   }),
 };
 
+const OPTION_LABELS = ['A', 'B', 'C', 'D'];
+
 export function QuizOverlay({ question }) {
   const { room, clearCurrentQuestion } = useGameStore();
-  const [selected, setSelected] = useState(null);   // option id
-  const [result, setResult] = useState(null);        // { correct, correctAnswer }
+  const [selected, setSelected] = useState(null);   // answerIndex (0-3)
+  const [result, setResult] = useState(null);        // { correct, points, correctAnswerIndex }
   const [timeLeft, setTimeLeft] = useState(TIME_LIMIT_MS);
   const startRef = useRef(Date.now());
   const timerRef = useRef(null);
@@ -78,47 +80,58 @@ export function QuizOverlay({ question }) {
   // Countdown
   useEffect(() => {
     startRef.current = Date.now();
+    setSelected(null);
+    setResult(null);
+    setTimeLeft(TIME_LIMIT_MS);
     timerRef.current = setInterval(() => {
       const elapsed = Date.now() - startRef.current;
       const remaining = Math.max(0, TIME_LIMIT_MS - elapsed);
       setTimeLeft(remaining);
       if (remaining === 0) {
         clearInterval(timerRef.current);
-        if (!selected) submitAnswer(null);
       }
     }, 100);
     return () => clearInterval(timerRef.current);
   }, [question.id]);
 
-  // Listen for result from server
+  // Private ack from server after submitting an answer
   useEffect(() => {
-    function onResult(data) {
+    function onAck(data) {
+      if (data.questionId !== question.id) return;
       setResult(data);
-      setTimeout(() => {
-        clearCurrentQuestion();
-      }, 2500);
+      setTimeout(() => clearCurrentQuestion(), 2500);
     }
-    socket.on('quiz_result', onResult);
-    return () => socket.off('quiz_result', onResult);
-  }, [clearCurrentQuestion]);
+    socket.on('quiz-answer-ack', onAck);
+    return () => socket.off('quiz-answer-ack', onAck);
+  }, [question.id, clearCurrentQuestion]);
 
-  function submitAnswer(answerId) {
-    if (selected || result) return;
+  // When the question closes (timeout or all answered), dismiss if no ack received yet
+  useEffect(() => {
+    function onResults(data) {
+      if (data.questionId !== question.id) return;
+      setTimeout(() => clearCurrentQuestion(), 2500);
+    }
+    socket.on('quiz-results', onResults);
+    return () => socket.off('quiz-results', onResults);
+  }, [question.id, clearCurrentQuestion]);
+
+  function submitAnswer(answerIndex) {
+    if (selected !== null || result) return;
     const timeMs = Date.now() - startRef.current;
-    setSelected(answerId);
+    setSelected(answerIndex);
     clearInterval(timerRef.current);
     socket.emit('quiz_answer', {
       roomCode: room?.code,
       questionId: question.id,
-      answerId,
+      answerIndex,
       timeMs,
     });
   }
 
-  function optionState(opt) {
-    if (!result) return selected === opt.id ? 'selected' : null;
-    if (opt.id === result.correctAnswer) return 'correct';
-    if (opt.id === selected && !result.correct) return 'wrong';
+  function optionState(index) {
+    if (!result) return selected === index ? 'selected' : null;
+    if (index === result.correctAnswerIndex) return 'correct';
+    if (index === selected && !result.correct) return 'wrong';
     return null;
   }
 
@@ -139,14 +152,14 @@ export function QuizOverlay({ question }) {
         <div style={s.question}>{question.question}</div>
 
         <div style={s.options}>
-          {question.options.map((opt) => (
+          {question.options.map((text, i) => (
             <button
-              key={opt.id}
-              style={s.optionBtn(optionState(opt))}
-              onClick={() => submitAnswer(opt.id)}
-              disabled={!!selected || !!result}
+              key={i}
+              style={s.optionBtn(optionState(i))}
+              onClick={() => submitAnswer(i)}
+              disabled={selected !== null || !!result}
             >
-              <strong>{opt.id}.</strong> {opt.text}
+              <strong>{OPTION_LABELS[i]}.</strong> {text}
             </button>
           ))}
         </div>
@@ -155,7 +168,7 @@ export function QuizOverlay({ question }) {
           <div style={s.result(result.correct)}>
             {result.correct
               ? `Correct! +${result.points} points`
-              : `Wrong. Correct answer: ${result.correctAnswer}`}
+              : `Wrong. Correct answer: ${OPTION_LABELS[result.correctAnswerIndex]}`}
           </div>
         )}
       </div>
