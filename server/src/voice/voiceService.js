@@ -9,156 +9,88 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
 // Audio files live at server/audio/ and are served statically at /audio
 export const AUDIO_DIR = join(__dirname, '../../audio');
 
-// ── Voice IDs ─────────────────────────────────────────────────────────────────
+// ── Narrator Voice ID ─────────────────────────────────────────────────────────
+// Single "Professor Oak"-style narrator — used for quiz questions, recaps, alerts
 
-const VOICE_IDS = {
-  owl: process.env.ELEVENLABS_VOICE_ID_OWL || 'EXAVITQu4vr4xnSDxMaL',
-  cat: process.env.ELEVENLABS_VOICE_ID_CAT || 'MF3mGyEYCl7XYWbV9V6O',
-  dog: process.env.ELEVENLABS_VOICE_ID_DOG || 'AZnzlk1XvdvUeBnXmlld',
+const NARRATOR_VOICE_ID = process.env.ELEVENLABS_VOICE_ID || 'EXAVITQu4vr4xnSDxMaL';
+
+// ── Narrator lines ────────────────────────────────────────────────────────────
+// Spoken by the narrator on key events. Pokémon reactions use SFX + text bubbles instead.
+
+const NARRATOR_LINES = {
+  'session-start': [
+    "Trainers, lock in! Your study session begins now.",
+    "Welcome, trainers! Time to focus. Let's go!",
+    "All trainers ready. Session starting. Lock in!",
+  ],
+  'focus-alert': [
+    "A trainer in the room has lost focus!",
+    "Attention! One of your fellow trainers is distracted.",
+    "Focus alert! A trainer needs to lock back in.",
+  ],
+  'session-end': [
+    "Session complete! Great work, trainers.",
+    "That's time! Let's see how everyone did.",
+    "Session over. Time for the results!",
+  ],
 };
 
-// ── Reaction scripts ──────────────────────────────────────────────────────────
-// 5 lines per category per species.
-// Categories: focus-lost | focus-regained | quiz-correct | quiz-wrong | streak-milestone
+export const NARRATOR_CATEGORIES = ['session-start', 'focus-alert', 'session-end'];
 
-const REACTIONS = {
-  owl: {
-    'focus-lost': [
-      "Hm. Distraction, is it? How predictably human.",
-      "Your attention has wandered. This is suboptimal.",
-      "I see you've found something more interesting than studying. Tragic.",
-      "Focus lost. The opportunity cost is quite real.",
-      "One cannot learn while staring at nothing. Return your gaze.",
-    ],
-    'focus-regained': [
-      "Ah. You've returned. Acceptable.",
-      "Focus restored. Let us continue without further interruption.",
-      "Good. The work has been waiting.",
-      "Composure regained. Proceed.",
-      "Back to it. I'd prefer this not happen again.",
-    ],
-    'quiz-correct': [
-      "Precisely correct. As expected from someone paying attention.",
-      "Accurate. Your preparation is evident.",
-      "That is correct. Well reasoned.",
-      "Correct. Perhaps there is hope for you yet.",
-      "Indeed. A sound and defensible answer.",
-    ],
-    'quiz-wrong': [
-      "Incorrect. I suggest reviewing your materials.",
-      "That is not right. Consider the underlying concept again.",
-      "Wrong. Don't let overconfidence override careful thought.",
-      "Incorrect. This is precisely why we study.",
-      "No. The correct answer was rather clear in retrospect.",
-    ],
-    'streak-milestone': [
-      "Thirty minutes of uninterrupted focus. Remarkable.",
-      "A sustained streak. I'm almost impressed.",
-      "Consistent focus achieved. This is how mastery is built.",
-      "Milestone reached. The discipline is duly noted.",
-      "An hour of focus. Even I would acknowledge that is admirable.",
-    ],
-  },
+// ── Text-bubble reactions (no TTS — displayed as text over the Pokémon) ──────
 
-  cat: {
-    'focus-lost': [
-      "Oh wow, you just... left. Classic.",
-      "Really? Right now? We were actually doing so well.",
-      "Cool, cool. Just going to stare into the void, huh.",
-      "Lost focus again. Shocking. Truly shocking.",
-      "You're literally doing the thing we said we weren't doing.",
-    ],
-    'focus-regained': [
-      "Oh you're back. Great. Thanks for eventually coming back.",
-      "Oh look who decided to show up again.",
-      "Welcome back, I guess.",
-      "Fine, you're focused again. Happy now? Great.",
-      "Back already? Cool. We can pretend that didn't happen.",
-    ],
-    'quiz-correct': [
-      "Fine, fine, you got it. Don't make it a whole thing.",
-      "Okay yeah, that's right. Whatever.",
-      "Correct. I'm not going to congratulate you excessively about it.",
-      "Yeah okay, good job. Moving on.",
-      "Sure, that's right. You actually know stuff. Noted.",
-    ],
-    'quiz-wrong': [
-      "That's... not right. We literally talked about this.",
-      "Wrong. I'm not mad, I'm just a little disappointed.",
-      "Nope. Do you even read the notes?",
-      "Incorrect. Maybe study harder next time? Just a thought.",
-      "Not even close. Just saying.",
-    ],
-    'streak-milestone': [
-      "Okay I'll admit it, twenty minutes straight is actually impressive.",
-      "Fine, you've been focused for a while. I'll acknowledge that.",
-      "Streak milestone. You're doing better than I expected, honestly.",
-      "I didn't think you had it in you. Respect, I guess.",
-      "That's... actually a solid streak. Please don't mess it up now.",
-    ],
-  },
-
-  dog: {
-    'focus-lost': [
-      "Hey! Hey! Come back! You looked away!",
-      "Your focus! Where did it go? Let's get it back right now!",
-      "Oh no no no! Stay with me! We are so close!",
-      "You looked away! That's okay! We can absolutely do this!",
-      "Focus lost! But we are NOT giving up! Let's GO!",
-    ],
-    'focus-regained': [
-      "YES! You're back! I knew you could do it!",
-      "FOCUS RESTORED! Let's GOOOOO!",
-      "There you are! I missed you! Back to work we go!",
-      "You came back! This is honestly the BEST!",
-      "Welcome back! Now let's absolutely crush the rest of this session!",
-    ],
-    'quiz-correct': [
-      "YES! THAT'S RIGHT! YOU ARE AMAZING!",
-      "CORRECT! I knew you knew it! This is INCREDIBLE!",
-      "OH WOW YES! Perfect answer! You are so incredibly smart!",
-      "THAT'S IT! YES YES YES! Let's GO!",
-      "CORRECT! You are an absolute LEGEND and I am so proud!",
-    ],
-    'quiz-wrong': [
-      "Aww, that wasn't right. But that's okay! We learn from this!",
-      "Not quite! But you tried so hard! That honestly matters!",
-      "Wrong answer, but you're still amazing! Keep going!",
-      "Oops! It's okay! Every mistake is just a lesson in disguise!",
-      "That's not it, but I still believe in you SO MUCH!",
-    ],
-    'streak-milestone': [
-      "TWENTY MINUTES! YOU ARE ABSOLUTELY UNSTOPPABLE!",
-      "STREAK MILESTONE! This is INCREDIBLE! Keep going forever!",
-      "OH WOW! You've been focused for SO LONG! I AM SO PROUD OF YOU!",
-      "AMAZING STREAK! You're doing PHENOMENALLY and I love it!",
-      "BEST STUDY SESSION EVER! You are completely crushing it!",
-    ],
-  },
+export const PET_REACTIONS = {
+  'focus-lost': [
+    "Huh?! Stay focused!",
+    "Hey! Don't zone out!",
+    "Come back! We were doing great!",
+    "No slacking off, trainer!",
+    "Focus! You got this!",
+  ],
+  'focus-regained': [
+    "Welcome back!",
+    "Let's go! Back on track!",
+    "That's the spirit!",
+    "Nice, you're locked in again!",
+    "Good to have you back!",
+  ],
+  'quiz-correct': [
+    "Nailed it!",
+    "You're so smart!",
+    "Correct! Amazing!",
+    "Big brain energy!",
+    "That's right!",
+  ],
+  'quiz-wrong': [
+    "Hmm, not quite...",
+    "We'll get the next one!",
+    "Keep studying!",
+    "Don't worry about it!",
+    "It happens, let's move on!",
+  ],
+  'streak-milestone': [
+    "Incredible focus streak!",
+    "You're on fire!",
+    "Unstoppable!",
+    "What a streak!",
+    "Keep it up, champion!",
+  ],
 };
 
-export const CATEGORIES = ['focus-lost', 'focus-regained', 'quiz-correct', 'quiz-wrong', 'streak-milestone'];
-export const SPECIES = ['cat', 'dog', 'owl'];
+export const PET_CATEGORIES = ['focus-lost', 'focus-regained', 'quiz-correct', 'quiz-wrong', 'streak-milestone'];
 
 // ── Service ───────────────────────────────────────────────────────────────────
 
 export class VoiceService {
   constructor() {
     this.apiKey = process.env.ELEVENLABS_API_KEY;
-    // Maps 'species:category:index' -> URL path (e.g. '/audio/reactions/cat/focus-lost-2.mp3')
-    this.reactionUrls = new Map();
+    // Maps 'narrator:{category}:{index}' -> URL path
+    this.narratorUrls = new Map();
   }
 
   // ── Core TTS ───────────────────────────────────────────────────────────────
 
-  /**
-   * Call the ElevenLabs TTS API and return a raw MP3 Buffer.
-   *
-   * @param {string} text    - text to synthesize
-   * @param {string} voiceId - ElevenLabs voice ID
-   * @returns {Promise<Buffer|null>}
-   */
-  async synthesize(text, voiceId) {
+  async synthesize(text, voiceId = NARRATOR_VOICE_ID) {
     if (!this.apiKey) {
       console.warn('[voice] ELEVENLABS_API_KEY not set — skipping TTS');
       return null;
@@ -194,24 +126,13 @@ export class VoiceService {
 
   // ── Disk I/O ───────────────────────────────────────────────────────────────
 
-  /**
-   * Synthesize text for a species and write the MP3 to disk.
-   * Skips generation if the file already exists (safe across restarts).
-   *
-   * @param {string} text        - text to speak
-   * @param {string} species     - 'cat' | 'dog' | 'owl'
-   * @param {string} relPath     - relative path under AUDIO_DIR, e.g. 'reactions/cat/focus-lost-0.mp3'
-   * @returns {Promise<string|null>} URL path the client can fetch, or null on failure
-   */
-  async generateAndSave(text, species, relPath) {
+  async generateAndSave(text, relPath) {
     const absPath = join(AUDIO_DIR, relPath);
     const urlPath = '/audio/' + relPath.replace(/\\/g, '/');
 
-    // Skip if already on disk — avoids redundant API calls on restart
     if (existsSync(absPath)) return urlPath;
 
-    const voiceId = VOICE_IDS[species] ?? VOICE_IDS.cat;
-    const buffer = await this.synthesize(text, voiceId);
+    const buffer = await this.synthesize(text);
     if (!buffer) return null;
 
     await mkdir(dirname(absPath), { recursive: true });
@@ -219,55 +140,42 @@ export class VoiceService {
     return urlPath;
   }
 
-  // ── Reactions ──────────────────────────────────────────────────────────────
+  // ── Narrator lines ─────────────────────────────────────────────────────────
 
-  /**
-   * Pre-generate all reaction audio files at server startup.
-   * Writes to audio/reactions/{species}/{category}-{index}.mp3
-   * Calls are serialized per-species to stay within ElevenLabs rate limits.
-   */
-  async preGenerateReactions() {
+  async preGenerateNarratorLines() {
     if (!this.apiKey) {
-      console.warn('[voice] Skipping reaction pre-generation — no ELEVENLABS_API_KEY');
+      console.warn('[voice] Skipping narrator pre-generation — no ELEVENLABS_API_KEY');
       return;
     }
 
-    console.log('[voice] Pre-generating reaction audio...');
+    console.log('[voice] Pre-generating narrator audio...');
     let generated = 0;
     let skipped = 0;
 
-    for (const species of SPECIES) {
-      for (const category of CATEGORIES) {
-        const lines = REACTIONS[species][category];
-        for (let i = 0; i < lines.length; i++) {
-          const relPath = `reactions/${species}/${category}-${i}.mp3`;
-          const url = await this.generateAndSave(lines[i], species, relPath);
-          const key = `${species}:${category}:${i}`;
-          if (url) {
-            this.reactionUrls.set(key, url);
-            generated++;
-          } else {
-            skipped++;
-          }
+    for (const category of NARRATOR_CATEGORIES) {
+      const lines = NARRATOR_LINES[category];
+      for (let i = 0; i < lines.length; i++) {
+        const relPath = `narrator/${category}-${i}.mp3`;
+        const url = await this.generateAndSave(lines[i], relPath);
+        const key = `narrator:${category}:${i}`;
+        if (url) {
+          this.narratorUrls.set(key, url);
+          generated++;
+        } else {
+          skipped++;
         }
       }
     }
 
-    console.log(`[voice] Reactions ready — ${generated} generated, ${skipped} skipped`);
+    console.log(`[voice] Narrator audio ready — ${generated} generated, ${skipped} skipped`);
   }
 
-  /**
-   * Pre-generate TTS audio for each quiz question.
-   * Attaches .audioUrl to each question object in-place.
-   * Writes to audio/quiz/{questionId}.mp3
-   *
-   * @param {object[]} questions - quiz bank (mutated in-place)
-   * @param {string}   species   - pet species for voice selection
-   */
-  async preGenerateQuizAudio(questions, species = 'cat') {
+  // ── Quiz TTS ───────────────────────────────────────────────────────────────
+
+  async preGenerateQuizAudio(questions) {
     if (!this.apiKey) return;
 
-    console.log(`[voice] Pre-generating quiz audio (${questions.length} questions, species: ${species})...`);
+    console.log(`[voice] Pre-generating quiz audio (${questions.length} questions)...`);
 
     for (const q of questions) {
       const text =
@@ -278,43 +186,43 @@ export class VoiceService {
         `Option four: ${q.options[3]}.`;
 
       const relPath = `quiz/${q.id}.mp3`;
-      const url = await this.generateAndSave(text, species, relPath);
+      const url = await this.generateAndSave(text, relPath);
       if (url) q.audioUrl = url;
     }
 
     console.log('[voice] Quiz audio generation complete');
   }
 
-  // ── Client helpers ─────────────────────────────────────────────────────────
+  // ── Recap TTS ──────────────────────────────────────────────────────────────
 
-  /**
-   * Return a random URL from the pre-generated reaction pool.
-   * Returns null if audio hasn't been generated (no API key, or startup still running).
-   *
-   * @param {string} species   - 'cat' | 'dog' | 'owl'
-   * @param {string} category  - one of CATEGORIES
-   * @returns {string|null}
-   */
-  getReactionUrl(species, category) {
-    const lines = REACTIONS[species]?.[category];
-    if (!lines) return null;
-    const i = Math.floor(Math.random() * lines.length);
-    return this.reactionUrls.get(`${species}:${category}:${i}`) ?? null;
+  async generateRecapAudio(recapText, sessionId) {
+    if (!this.apiKey) return null;
+
+    const relPath = `recaps/${sessionId}.mp3`;
+    return this.generateAndSave(recapText, relPath);
   }
 
-  /**
-   * Return the full manifest of all generated reaction URLs, keyed by
-   * species → category → index[].  Used by GET /api/audio/reactions.
-   *
-   * @returns {{ [species]: { [category]: string[] } }}
-   */
-  getReactionManifest() {
+  // ── Client helpers ─────────────────────────────────────────────────────────
+
+  getNarratorUrl(category) {
+    const lines = NARRATOR_LINES[category];
+    if (!lines) return null;
+    const i = Math.floor(Math.random() * lines.length);
+    return this.narratorUrls.get(`narrator:${category}:${i}`) ?? null;
+  }
+
+  getRandomPetReaction(category) {
+    const lines = PET_REACTIONS[category];
+    if (!lines) return null;
+    return lines[Math.floor(Math.random() * lines.length)];
+  }
+
+  getNarratorManifest() {
     const manifest = {};
-    for (const [key, url] of this.reactionUrls) {
-      const [species, category, indexStr] = key.split(':');
-      manifest[species] ??= {};
-      manifest[species][category] ??= [];
-      manifest[species][category][parseInt(indexStr)] = url;
+    for (const [key, url] of this.narratorUrls) {
+      const [, category, indexStr] = key.split(':');
+      manifest[category] ??= [];
+      manifest[category][parseInt(indexStr)] = url;
     }
     return manifest;
   }

@@ -6,6 +6,7 @@ import { PetPlaceholder } from './Pet.jsx';
 import { FocusRing } from './FocusRing.jsx';
 import { SessionHUD } from '../ui/SessionHUD.jsx';
 import { QuizOverlay } from '../ui/QuizOverlay.jsx';
+import { PetTextBubble } from '../ui/PetTextBubble.jsx';
 import { useGameStore } from '../../store/gameStore.js';
 import { useFocusTracker } from '../../hooks/useFocusTracker.js';
 import { socket } from '../../lib/socket.js';
@@ -15,7 +16,7 @@ import { socket } from '../../lib/socket.js';
  * Mounts webcam focus tracking and syncs focus events to server.
  */
 export function StudySession() {
-  const { room, mySocketId, focusStates, currentQuestion } = useGameStore();
+  const { room, mySocketId, focusStates, currentQuestion, petBubbles } = useGameStore();
 
   const handleFocusChange = useCallback(
     (focused) => {
@@ -88,6 +89,18 @@ export function StudySession() {
       {/* 2D overlays */}
       <SessionHUD myFocused={myFocused} partnerFocused={partnerFocused} />
       {currentQuestion && <QuizOverlay question={currentQuestion} />}
+
+      {/* Pet text bubbles */}
+      {mySocketId && petBubbles[mySocketId] && (
+        <div style={{ position: 'absolute', bottom: '35%', left: '30%', pointerEvents: 'none' }}>
+          <PetTextBubble text={petBubbles[mySocketId]} />
+        </div>
+      )}
+      {partner && petBubbles[partner.socketId] && (
+        <div style={{ position: 'absolute', bottom: '35%', right: '30%', pointerEvents: 'none' }}>
+          <PetTextBubble text={petBubbles[partner.socketId]} />
+        </div>
+      )}
     </div>
   );
 }

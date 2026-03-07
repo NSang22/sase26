@@ -61,7 +61,7 @@ async function handleQuizUpload(req, res) {
     room.quizIndex = 0; // reset in case of re-upload
 
     // Pre-generate TTS for each question in the background (non-blocking)
-    voiceService.preGenerateQuizAudio(questions, room.petSpecies).catch((err) =>
+    voiceService.preGenerateQuizAudio(questions).catch((err) =>
       console.error('[voice] preGenerateQuizAudio failed:', err.message)
     );
 
@@ -181,10 +181,10 @@ app.get('/api/bet/status/:roomCode', (req, res) => {
   res.json(getBetStatus(room));
 });
 
-// Returns pre-generated reaction URLs grouped by species → category → index[]
+// Returns pre-generated narrator URLs grouped by category → index[]
 // Client uses this on mount to know which files exist before events fire.
-app.get('/api/audio/reactions', (_req, res) => {
-  res.json(voiceService.getReactionManifest());
+app.get('/api/audio/narrator', (_req, res) => {
+  res.json(voiceService.getNarratorManifest());
 });
 
 app.get('/api/leaderboard', async (_req, res) => {
@@ -215,7 +215,9 @@ function shouldStartSession(room) {
 
 function startSession(room) {
   room.startSession();
-  io.to(room.code).emit('session_start', { startTime: room.startTime });
+  // Include narrator session-start audio URL
+  const narratorAudioUrl = voiceService.getNarratorUrl('session-start');
+  io.to(room.code).emit('session_start', { startTime: room.startTime, narratorAudioUrl });
   scheduleNextQuiz(room);
   console.log(`[room:${room.code}] Session started with ${room.players.size} players`);
 }
@@ -358,6 +360,17 @@ async function endSession(room) {
   // ── Solana payout ───────────────────────────────────────────────────────────
   const payoutTx = await escrowService.handleSessionPayout(summary);
   if (payoutTx) summary.payoutTxSignature = payoutTx;
+
+  // ── Generate recap narration (ElevenLabs) ─────────────────────────────────
+  try {
+    const recapText = summary.players
+      .map((p) => `${p.username}: ${(p.focusPercent * 100).toFixed(0)}% focus, ${(p.quizAccuracy * 100).toFixed(0)}% quiz accuracy.`)
+      .join(' ') + (summary.winner ? ` The winner is ${summary.winner.username}!` : ' It\'s a tie!');
+    const recapUrl = await voiceService.generateRecapAudio(recapText, room.code);
+    if (recapUrl) summary.recapAudioUrl = recapUrl;
+  } catch (err) {
+    console.error('[voice] Recap audio generation failed:', err.message);
+  }
 
   io.to(room.code).emit('session_end', summary);
   roomManager.removeRoom(room.code);
@@ -521,8 +534,8 @@ const PORT = process.env.PORT || 3001;
 connectDB().then(() => {
   httpServer.listen(PORT, () => {
     console.log(`Buddy Lock-In server → http://localhost:${PORT}`);
-    voiceService.preGenerateReactions().catch((err) =>
-      console.error('[voice] Startup reaction generation failed:', err.message)
+    voiceService.preGenerateNarratorLines().catch((err) =>
+      console.error('[voice] Startup narrator generation failed:', err.message)
     );
   });
 });
