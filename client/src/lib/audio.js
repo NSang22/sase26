@@ -1,9 +1,8 @@
 /**
  * Audio utilities for Buddy: Lock In
  *
- * Handles playback of base64-encoded MP3 clips returned by the server
- * (pre-generated via ElevenLabs). Includes a simple queue to prevent
- * overlapping pet voice lines.
+ * Handles playback of server-served MP3 URLs (pre-generated via ElevenLabs).
+ * Includes a simple queue to prevent overlapping pet voice lines.
  */
 
 let activeAudio = null;
@@ -12,10 +11,10 @@ let isPlaying = false;
 
 function playNext() {
   if (isPlaying || queue.length === 0) return;
-  const { base64, onEnd } = queue.shift();
+  const { url, onEnd } = queue.shift();
   isPlaying = true;
 
-  const audio = new Audio(`data:audio/mpeg;base64,${base64}`);
+  const audio = new Audio(url);
   activeAudio = audio;
 
   audio.onended = () => {
@@ -39,17 +38,17 @@ function playNext() {
 }
 
 /**
- * Queue a base64 audio clip for sequential playback.
- * @param {string} base64 - MP3 data as base64 string
+ * Queue an audio URL for sequential playback.
+ * @param {string} url - URL of the MP3 file (e.g. /audio/reactions/cat/focus-lost-2.mp3)
  * @param {{ priority?: boolean, onEnd?: () => void }} options
  */
-export function playAudio(base64, { priority = false, onEnd } = {}) {
-  if (!base64) return;
+export function playAudio(url, { priority = false, onEnd } = {}) {
+  if (!url) return;
   if (priority) {
     stopAudio();
-    queue.unshift({ base64, onEnd });
+    queue.unshift({ url, onEnd });
   } else {
-    queue.push({ base64, onEnd });
+    queue.push({ url, onEnd });
   }
   playNext();
 }
@@ -70,6 +69,6 @@ export function stopAudio() {
 /**
  * Play a quiz question audio clip (priority — interrupts pet chatter).
  */
-export function playQuestionAudio(base64) {
-  playAudio(base64, { priority: true });
+export function playQuestionAudio(url) {
+  playAudio(url, { priority: true });
 }

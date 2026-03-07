@@ -1,12 +1,11 @@
 /**
  * Server-Managed Solana Escrow
  *
- * The server holds a keypair (SERVER_WALLET_KEYPAIR). Both players send SOL
+ * The server holds a keypair (SERVER_WALLET_KEYPAIR). All players send SOL
  * directly to this wallet before the session starts. On session end, the server
- * sends the full pot to the winner (or refunds both on a tie).
+ * sends the full pot to the winner, or splits evenly among tied players.
  *
- * No on-chain program required — centralized custodial escrow, identical demo UX.
- * A future production version could use an Anchor program for trustless resolution.
+ * Supports 2–4 players. Uses devnet by default.
  */
 
 import {
@@ -27,7 +26,12 @@ export class EscrowService {
 
     const raw = process.env.SERVER_WALLET_KEYPAIR;
     if (raw) {
-      this.serverKeypair = Keypair.fromSecretKey(Uint8Array.from(JSON.parse(raw)));
+      try {
+        this.serverKeypair = Keypair.fromSecretKey(Uint8Array.from(JSON.parse(raw)));
+      } catch (err) {
+        console.error('[escrow] Invalid SERVER_WALLET_KEYPAIR — generating ephemeral:', err.message);
+        this.serverKeypair = Keypair.generate();
+      }
     } else {
       this.serverKeypair = Keypair.generate();
       console.warn(
@@ -47,8 +51,13 @@ export class EscrowService {
 
   /**
    * Verify a player's deposit on-chain.
-   * Parses the transaction and checks it contains a transfer of at least
-   * `expectedLamports` from `fromAddress` to the server wallet.
+   * Checks the tx contains a transfer of at least `expectedLamports`
+   * from `fromAddress` to the server wallet, and that the tx is confirmed.
+   *
+   * @param {string} txSignature
+   * @param {string} fromAddress   - sender's wallet address
+   * @param {number} expectedLamports
+   * @returns {Promise<boolean>}
    */
   async verifyDeposit(txSignature, fromAddress, expectedLamports) {
     try {
@@ -56,7 +65,15 @@ export class EscrowService {
         commitment: 'confirmed',
         maxSupportedTransactionVersion: 0,
       });
-      if (!tx) return false;
+
+      if (!tx) {
+        console.warn('[escrow] verifyDeposit: tx not found:', txSignature);
+        return false;
+      }
+      if (tx.meta?.err) {
+        console.warn('[escrow] verifyDeposit: tx has error:', JSON.stringify(tx.meta.err));
+        return false;
+      }
 
       for (const ix of tx.transaction.message.instructions) {
         if (
@@ -68,6 +85,8 @@ export class EscrowService {
           return true;
         }
       }
+
+      console.warn('[escrow] verifyDeposit: no matching transfer instruction found');
       return false;
     } catch (err) {
       console.error('[escrow] verifyDeposit error:', err.message);
@@ -76,64 +95,96 @@ export class EscrowService {
   }
 
   /**
-   * Send payout from server wallet to winner, or refund both on a tie.
+   * Build and send a payout transaction.
+   * Accepts an array of { walletAddress, lamports } recipients.
+   * All transfers are batched into a single transaction.
    *
-   * @param {object} params
-   * @param {string|null} params.winnerAddress  - null = tie
-   * @param {string} params.player1Address
-   * @param {string} params.player2Address
-   * @param {number} params.stakeLamports       - per-player stake
-   * @returns {string} transaction signature
+   * @param {{ walletAddress: string, lamports: number }[]} recipients
+   * @returns {Promise<string>} transaction signature
    */
-  async payout({ winnerAddress, player1Address, player2Address, stakeLamports }) {
-    const tx = new Transaction();
+  async payout(recipients) {
+    if (!recipients.length) throw new Error('No recipients for payout');
 
-    if (winnerAddress) {
+    const tx = new Transaction();
+    for (const { walletAddress, lamports } of recipients) {
+      if (lamports <= 0) continue;
       tx.add(
         SystemProgram.transfer({
           fromPubkey: this.serverKeypair.publicKey,
-          toPubkey: new PublicKey(winnerAddress),
-          lamports: stakeLamports * 2,
-        })
-      );
-    } else {
-      tx.add(
-        SystemProgram.transfer({
-          fromPubkey: this.serverKeypair.publicKey,
-          toPubkey: new PublicKey(player1Address),
-          lamports: stakeLamports,
-        }),
-        SystemProgram.transfer({
-          fromPubkey: this.serverKeypair.publicKey,
-          toPubkey: new PublicKey(player2Address),
-          lamports: stakeLamports,
+          toPubkey: new PublicKey(walletAddress),
+          lamports,
         })
       );
     }
 
-    return sendAndConfirmTransaction(this.connection, tx, [this.serverKeypair]);
+    if (!tx.instructions.length) throw new Error('Payout transaction has no instructions');
+
+    const sig = await sendAndConfirmTransaction(this.connection, tx, [this.serverKeypair]);
+    return sig;
   }
 
   /**
-   * Called by endSession. Returns payout tx signature or null.
+   * Called by endSession. Calculates who to pay and sends the transaction.
+   * - Single winner: winner receives the full pot (stakeAmount × playerCount)
+   * - Tie: pot split evenly among all players with the highest session score.
+   *   Any remainder from integer division stays in the server wallet.
+   *
+   * @param {object} summary - from room.getSummary()
+   * @returns {Promise<string|null>} payout tx signature, or null if skipped/failed
    */
   async handleSessionPayout(summary) {
     if (summary.mode !== 'locked-in') return null;
+    if (!summary.stakeAmount || summary.stakeAmount <= 0) return null;
 
-    const [p1, p2] = summary.players;
-    if (!p1?.walletAddress || !p2?.walletAddress) {
-      console.warn('[escrow] Missing wallet addresses — skipping payout');
-      return null;
+    const pot = summary.stakeAmount * summary.players.length;
+
+    let recipients;
+
+    if (summary.winner) {
+      // Single winner takes the whole pot
+      if (!summary.winner.walletAddress) {
+        console.warn('[escrow] Winner has no wallet address — skipping payout');
+        return null;
+      }
+      recipients = [{ walletAddress: summary.winner.walletAddress, lamports: pot }];
+    } else {
+      // Tie: split among all players with the highest session score
+      if (!summary.players.length) return null;
+      const maxScore = summary.players[0].sessionScore; // players are sorted desc
+      const tied = summary.players.filter((p) => p.sessionScore === maxScore);
+
+      const missing = tied.filter((p) => !p.walletAddress);
+      if (missing.length) {
+        console.warn(
+          '[escrow] Tied player(s) missing wallet address — skipping payout:',
+          missing.map((p) => p.username)
+        );
+        return null;
+      }
+
+      const share = Math.floor(pot / tied.length);
+      recipients = tied.map((p) => ({ walletAddress: p.walletAddress, lamports: share }));
+    }
+
+    // Sanity-check server balance before attempting
+    try {
+      const balance = await this.connection.getBalance(this.serverKeypair.publicKey);
+      const totalPayout = recipients.reduce((s, r) => s + r.lamports, 0);
+      if (balance < totalPayout) {
+        console.error(
+          `[escrow] Insufficient server balance: ${balance} lamports, need ${totalPayout}`
+        );
+        return null;
+      }
+    } catch (err) {
+      console.warn('[escrow] Balance check failed — proceeding anyway:', err.message);
     }
 
     try {
-      const txSig = await this.payout({
-        winnerAddress: summary.winner?.walletAddress ?? null,
-        player1Address: p1.walletAddress,
-        player2Address: p2.walletAddress,
-        stakeLamports: summary.stakeAmount,
-      });
-      console.log('[escrow] Payout tx:', txSig);
+      const txSig = await this.payout(recipients);
+      console.log(
+        `[escrow] Payout sent (${(pot / LAMPORTS_PER_SOL).toFixed(4)} SOL) → tx: ${txSig}`
+      );
       return txSig;
     } catch (err) {
       console.error('[escrow] Payout failed:', err.message);
@@ -141,6 +192,7 @@ export class EscrowService {
     }
   }
 
+  /** Current server wallet balance in SOL. */
   async getServerBalance() {
     const lamports = await this.connection.getBalance(this.serverKeypair.publicKey);
     return lamports / LAMPORTS_PER_SOL;

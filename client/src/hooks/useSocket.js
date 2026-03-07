@@ -44,21 +44,24 @@ export function useSocket() {
       setPhase('session');
     });
 
-    socket.on('focus_update', ({ playerId, focused, roomFocusState }) => {
-      setFocusStates(roomFocusState);
+    // players[] is the live focus data array from getLiveFocusData()
+    socket.on('focus_update', ({ players }) => {
+      const states = {};
+      players.forEach((p) => { states[p.socketId] = p.focused; });
+      setFocusStates(states);
     });
 
-    socket.on('score_update', (scores) => {
-      setScores(scores);
-    });
-
-    socket.on('quiz_question', (question) => {
+    // surprise-quiz: { question, windowMs }
+    socket.on('surprise-quiz', ({ question }) => {
       setCurrentQuestion(question);
-      if (question.audioBase64) playQuestionAudio(question.audioBase64);
+      if (question.audioUrl) playQuestionAudio(question.audioUrl);
     });
 
-    socket.on('quiz_result', ({ correct, points, correctAnswer }) => {
-      // Handled locally in QuizOverlay — no store update needed here
+    // quiz-answer-ack: private result for the answering player (handled in QuizOverlay)
+
+    // quiz-results: broadcast after question closes; update scores for everyone
+    socket.on('quiz-results', ({ scores }) => {
+      setScores(scores);
     });
 
     socket.on('session_end', (summary) => {
@@ -66,8 +69,8 @@ export function useSocket() {
       setPhase('recap');
     });
 
-    socket.on('player_disconnected', ({ playerId }) => {
-      console.warn('[socket] Player disconnected:', playerId);
+    socket.on('player_left', ({ playerId }) => {
+      console.warn('[socket] Player left:', playerId);
     });
 
     socket.on('error', ({ message }) => {
@@ -75,7 +78,7 @@ export function useSocket() {
     });
 
     socket.on('escrow_ready', () => {
-      console.log('[socket] Both escrows confirmed — session can start');
+      console.log('[socket] All escrows confirmed — session can start');
     });
 
     return () => {
@@ -84,11 +87,10 @@ export function useSocket() {
       socket.off('room_update');
       socket.off('session_start');
       socket.off('focus_update');
-      socket.off('score_update');
-      socket.off('quiz_question');
-      socket.off('quiz_result');
+      socket.off('surprise-quiz');
+      socket.off('quiz-results');
       socket.off('session_end');
-      socket.off('player_disconnected');
+      socket.off('player_left');
       socket.off('error');
       socket.off('escrow_ready');
     };
