@@ -34,7 +34,7 @@ A gamified co-working web app where two users join a synchronized 3D study room.
 | Vision AI | MediaPipe Face Landmarker | In-browser head pose estimation (pitch/yaw) |
 | LLM | Gemini 1.5 Flash | Quiz generation, session recaps, study tips |
 | Voice | ElevenLabs API | Pet voice lines + spoken quiz delivery |
-| Blockchain | Solana (Anchor) + Phantom Wallet | Escrow-based session betting |
+| Blockchain | Solana (@solana/web3.js) + Phantom Wallet | Server-managed escrow betting |
 | Database | MongoDB Atlas | User accounts, pet progression, session history, leaderboards |
 | Backend | Node.js + Express | Socket.io server, API glue, LLM/ElevenLabs calls |
 
@@ -101,11 +101,13 @@ Each pet has three animation states:
 **Betting flow:**
 1. Host creates room and sets stake amount (e.g., 0.1 SOL).
 2. Both players connect Phantom wallets in the waiting room.
-3. Both approve the escrow transaction. Session cannot start until both have committed.
+3. Both send SOL to a server-controlled wallet. Session cannot start until both transactions confirm.
 4. During session, staked amount is visible on screen at all times.
 5. On session end, server calculates winner via weighted score: `0.8 * focus_percentage + 0.2 * quiz_accuracy`. Focus is the core metric — quizzes are bonus reinforcement, not the main event.
-6. Server submits result on-chain. Escrow program releases funds to winner.
+6. Server sends funds from the held wallet to the winner's address.
 7. Ties → funds returned to both.
+
+**Note:** This is a server-managed escrow (centralized). Production version would use an Anchor on-chain program for trustless resolution. For a hackathon MVP, the demo is identical and saves hours of Rust development.
 
 **Demo strategy:** Show casual mode first to explain the mechanics. Then reveal "but what if the stakes were real?" and demo the wallet flow. That's the pitch moment.
 
@@ -174,7 +176,7 @@ Each pet has three animation states:
 - Gemini API integration: PDF parsing → quiz generation.
 - ElevenLabs API: pre-generate voice clips for quiz questions + pet reactions.
 - MongoDB Atlas: user accounts, session storage, leaderboard queries.
-- Solana escrow program (Anchor): deploy, integrate with backend for score submission + payout.
+- Solana integration (@solana/web3.js): server-managed wallet, receive stakes, send payouts to winner.
 
 ---
 
@@ -211,7 +213,7 @@ Each pet has three animation states:
 |---|---|
 | .glb animation pipeline issues | Agree on model contract (scale, clip names, orientation) in hour 1. Placeholder cube for early frontend dev. |
 | Gemini returns malformed quiz JSON | Validate and retry with stricter prompt. Pre-generate full quiz bank at session start, not on-the-fly. |
-| Solana escrow bugs during demo | Have casual mode as fallback. Demo betting with devnet SOL. |
+| Solana transfer bugs during demo | Have casual mode as fallback. Demo with devnet SOL and pre-funded wallets. |
 | ElevenLabs rate limits | Pre-generate all voice lines during waiting room phase. Cache aggressively. |
 | Two-laptop demo failure | Support same-machine demo: two browser tabs, one with webcam, one simulated. |
 | MongoDB connection issues | Pre-seed data locally. Have a local fallback or show screenshots of leaderboard if Atlas is down. |
