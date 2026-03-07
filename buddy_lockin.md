@@ -103,7 +103,7 @@ Each pet has three animation states:
 2. Both players connect Phantom wallets in the waiting room.
 3. Both approve the escrow transaction. Session cannot start until both have committed.
 4. During session, staked amount is visible on screen at all times.
-5. On session end, server calculates winner via weighted score: `0.6 * focus_percentage + 0.4 * quiz_accuracy`.
+5. On session end, server calculates winner via weighted score: `0.8 * focus_percentage + 0.2 * quiz_accuracy`. Focus is the core metric — quizzes are bonus reinforcement, not the main event.
 6. Server submits result on-chain. Escrow program releases funds to winner.
 7. Ties → funds returned to both.
 
