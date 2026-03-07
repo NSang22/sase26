@@ -1,4 +1,4 @@
-# Buddy: Lock In — Full Project Spec
+# Buddy! Lock In! — Full Project Spec
 
 > **Tagline:** If you lose focus, your pet falls asleep — and your money's on the line.
 
