@@ -204,6 +204,9 @@ export function WaitingRoom() {
   const [quizValue, setQuizValue] = useState(5);
   const [mode, setMode] = useState('casual');
   const [stakeAmount, setStakeAmount] = useState(0.1);
+  const [materials, setMaterials] = useState([]);
+  const [selectedMaterial, setSelectedMaterial] = useState(null);
+  const [uploadTab, setUploadTab] = useState('upload'); // 'upload' | 'library'
 
   // Canvas background
   const canvasRef = useRef(null);
@@ -349,6 +352,12 @@ export function WaitingRoom() {
     return () => socket.off('mode_updated');
   }, []);
 
+  useEffect(() => {
+    axios.get('/api/users/materials')
+      .then((res) => setMaterials(res.data))
+      .catch(() => {});
+  }, []);
+
   if (!room) return null;
 
   const isHost = room.players.find((p) => p.socketId === socket.id)?.isHost;
@@ -377,6 +386,16 @@ export function WaitingRoom() {
   function handleReady() {
     socket.emit('player_ready', { roomCode: room.code });
     setReady(true);
+  }
+
+  async function handleReuseMaterial() {
+    if (!selectedMaterial) return;
+    try {
+      await axios.post(`/api/rooms/${room.code}/material/reuse`, { materialId: selectedMaterial.id });
+      setUploadDone(true);
+    } catch (err) {
+      setError('Failed to load material: ' + (err.response?.data?.error ?? err.message));
+    }
   }
 
   async function handleApproveEscrow() {
@@ -719,26 +738,141 @@ export function WaitingRoom() {
 
         {/* Study material upload (host only) */}
         {isHost && (
-          <>
-            <div style={s.label}>Upload study material (PDF or .txt)</div>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+            <div style={{ ...s.label, color: '#F8D030' }}>STUDY MATERIAL</div>
             {uploadDone ? (
               <div style={{ ...s.tag, textAlign: 'center' }}>Quiz bank generated!</div>
             ) : (
               <>
-                <label style={s.uploadLabel} htmlFor="material-upload">
-                  {uploading ? 'Generating quiz...' : 'Click to upload file'}
-                </label>
-                <input
-                  id="material-upload"
-                  type="file"
-                  style={s.upload}
-                  accept=".pdf,.txt,.md"
-                  onChange={handleUpload}
-                  disabled={uploading}
-                />
+                {/* Tabs — only rendered when there are previous materials */}
+                {materials.length > 0 && (
+                  <div style={{ display: 'flex', gap: 6 }}>
+                    {[
+                      { id: 'upload',  label: 'UPLOAD NEW' },
+                      { id: 'library', label: 'MY LIBRARY' },
+                    ].map(({ id, label }) => {
+                      const active = uploadTab === id;
+                      return (
+                        <button
+                          key={id}
+                          onClick={() => setUploadTab(id)}
+                          style={{
+                            fontFamily: "'Press Start 2P', monospace",
+                            fontSize: 7,
+                            padding: '6px 10px',
+                            borderRadius: 4,
+                            border: active ? '2px solid #F8D030' : '2px solid rgba(255,255,255,0.1)',
+                            background: active ? '#F8D030' : 'rgba(0,0,0,0.3)',
+                            color: active ? '#0A0A2E' : '#8888AA',
+                            cursor: 'pointer',
+                            boxShadow: active ? '0 0 8px rgba(248,208,48,0.4)' : 'none',
+                            transition: 'all 0.15s',
+                          }}
+                        >
+                          {label}
+                        </button>
+                      );
+                    })}
+                  </div>
+                )}
+
+                {/* Upload tab (default; always shown when no materials) */}
+                {(uploadTab === 'upload' || materials.length === 0) ? (
+                  <>
+                    <label style={s.uploadLabel} htmlFor="material-upload">
+                      {uploading ? 'Generating quiz...' : 'Click to upload file'}
+                    </label>
+                    <input
+                      id="material-upload"
+                      type="file"
+                      style={s.upload}
+                      accept=".pdf,.txt,.md"
+                      onChange={handleUpload}
+                      disabled={uploading}
+                    />
+                  </>
+                ) : (
+                  /* Library tab */
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                    <div style={{
+                      maxHeight: 120,
+                      overflowY: 'auto',
+                      display: 'flex',
+                      flexDirection: 'column',
+                      gap: 4,
+                    }}>
+                      {materials.length === 0 ? (
+                        <span style={{
+                          fontFamily: "'Press Start 2P', monospace",
+                          fontSize: 6,
+                          color: '#444466',
+                        }}>
+                          NO PREVIOUS MATERIALS
+                        </span>
+                      ) : materials.map((mat) => {
+                        const isSelected = selectedMaterial?.id === mat.id;
+                        return (
+                          <div
+                            key={mat.id}
+                            onClick={() => setSelectedMaterial(mat)}
+                            style={{
+                              padding: '6px 10px',
+                              borderRadius: 4,
+                              border: isSelected ? '2px solid #F8D030' : '2px solid rgba(255,255,255,0.08)',
+                              background: isSelected ? 'rgba(248,208,48,0.08)' : 'rgba(0,0,0,0.3)',
+                              boxShadow: isSelected ? '0 0 8px rgba(248,208,48,0.2)' : 'none',
+                              cursor: 'pointer',
+                              display: 'flex',
+                              flexDirection: 'column',
+                              gap: 3,
+                              transition: 'all 0.15s',
+                            }}
+                          >
+                            <span style={{
+                              fontFamily: "'Press Start 2P', monospace",
+                              fontSize: 7,
+                              color: '#CCC',
+                            }}>
+                              {mat.filename}
+                            </span>
+                            <span style={{
+                              fontFamily: "'Press Start 2P', monospace",
+                              fontSize: 5,
+                              color: '#555566',
+                            }}>
+                              {new Date(mat.createdAt).toLocaleDateString()}
+                            </span>
+                          </div>
+                        );
+                      })}
+                    </div>
+                    <button
+                      onClick={handleReuseMaterial}
+                      disabled={!selectedMaterial}
+                      style={{
+                        fontFamily: "'Press Start 2P', monospace",
+                        fontSize: 7,
+                        padding: '8px 0',
+                        borderRadius: 4,
+                        border: 'none',
+                        background: selectedMaterial ? '#F8D030' : '#1a1a2e',
+                        color: selectedMaterial ? '#0A0A2E' : '#555',
+                        cursor: selectedMaterial ? 'pointer' : 'not-allowed',
+                        opacity: selectedMaterial ? 1 : 0.4,
+                        boxShadow: selectedMaterial
+                          ? '0 3px 0 #B8860B, 0 0 10px rgba(248,208,48,0.3)'
+                          : 'none',
+                        letterSpacing: 1,
+                        transition: 'all 0.15s',
+                      }}
+                    >
+                      USE THIS
+                    </button>
+                  </div>
+                )}
               </>
             )}
-          </>
+          </div>
         )}
 
         {/* Locked-In wallet section */}
