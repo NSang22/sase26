@@ -25,6 +25,8 @@ export function useSocket() {
     setSummary,
     showPetBubble,
     setNarratorManifest,
+    setScreenAnalysis,
+    setFakeFocusWarning,
   } = useGameStore();
 
   const emit = useCallback((event, data) => {
@@ -123,6 +125,17 @@ export function useSocket() {
       }
     });
 
+    // ── Screen analysis from server ────────────────────────────────────────
+    socket.on('screen-analysis', (data) => {
+      setScreenAnalysis(data);
+    });
+
+    socket.on('fake-focus', ({ distraction }) => {
+      setFakeFocusWarning(distraction);
+      const myId = useGameStore.getState().mySocketId;
+      if (myId) showPetBubble(myId, '🚨 I see you slacking!');
+    });
+
     socket.on('player_left', ({ playerId }) => {
       console.warn('[socket] Player left:', playerId);
     });
@@ -144,6 +157,8 @@ export function useSocket() {
       socket.off('surprise-quiz');
       socket.off('quiz-results');
       socket.off('session_end');
+      socket.off('screen-analysis');
+      socket.off('fake-focus');
       socket.off('player_left');
       socket.off('error');
       socket.off('escrow_ready');
