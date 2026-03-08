@@ -5,7 +5,7 @@ import { useGameStore } from '../../store/gameStore.js';
 
 const s = {
   root: {
-    minHeight: '100vh',
+    height: '100vh',
     background: 'linear-gradient(135deg, #0a0a18 0%, #12122a 100%)',
     padding: '32px 24px 64px',
     display: 'flex',
@@ -13,6 +13,7 @@ const s = {
     alignItems: 'center',
     gap: 32,
     overflowY: 'auto',
+    boxSizing: 'border-box',
   },
   title: { fontSize: 30, fontWeight: 900, color: '#a78bfa', letterSpacing: 2 },
   subtitle: { color: '#555', fontSize: 14 },
@@ -42,6 +43,62 @@ const s = {
     fontWeight: 700,
     fontSize: 15,
     maxWidth: 480,
+  },
+  potBox: {
+    background: '#0a1a0e',
+    border: '2px solid #22c55e',
+    borderRadius: 16,
+    padding: '20px 28px',
+    width: '100%',
+    maxWidth: 520,
+    display: 'flex',
+    flexDirection: 'column',
+    gap: 12,
+    boxShadow: '0 0 32px rgba(34,197,94,0.15)',
+  },
+  potTitle: {
+    fontSize: 18,
+    fontWeight: 900,
+    color: '#4ade80',
+    display: 'flex',
+    alignItems: 'center',
+    gap: 10,
+  },
+  simBadge: {
+    fontSize: 11,
+    fontWeight: 700,
+    color: '#fbbf24',
+    background: 'rgba(251,191,36,0.12)',
+    border: '1px solid #b45309',
+    borderRadius: 8,
+    padding: '2px 8px',
+  },
+  txLink: {
+    fontSize: 12,
+    color: '#818cf8',
+    textDecoration: 'none',
+    marginLeft: 'auto',
+  },
+  payoutRows: {
+    display: 'flex',
+    flexDirection: 'column',
+    gap: 8,
+  },
+  payoutRow: (isWin) => ({
+    display: 'flex',
+    alignItems: 'center',
+    gap: 12,
+    padding: '10px 14px',
+    background: isWin ? 'rgba(34,197,94,0.08)' : 'rgba(255,255,255,0.03)',
+    border: `1px solid ${isWin ? '#166534' : '#1e1e3a'}`,
+    borderRadius: 10,
+  }),
+  potVerdict: {
+    textAlign: 'center',
+    fontSize: 14,
+    color: '#9ca3af',
+    paddingTop: 4,
+    borderTop: '1px solid #1e1e3a',
   },
   // Player cards row
   cardsRow: { display: 'flex', gap: 20, flexWrap: 'wrap', justifyContent: 'center' },
@@ -337,9 +394,15 @@ export function RecapScreen() {
 
   if (!summary) return null;
 
-  const { players, winner, mode, stakeAmount, duration: dur } = summary;
-  const stakeSOL = mode === 'locked-in' ? (stakeAmount / 1e9).toFixed(2) : null;
+  const { players, winner, mode, stakeAmount, duration: dur, payouts, payoutsSimulated, totalPotSol, payoutTxSignature } = summary;
+  const isLockedIn = mode === 'locked-in' || mode === 'demo';
   const activePlayer = players[activeTab] ?? players[0];
+
+  // Map socketId/walletAddress -> payout entry for quick lookup
+  const payoutByUsername = {};
+  if (payouts) {
+    for (const p of payouts) payoutByUsername[p.username] = p;
+  }
 
   return (
     <div style={s.root}>
@@ -352,11 +415,49 @@ export function RecapScreen() {
         <div style={s.tieBanner}>It's a tie — well played</div>
       )}
 
-      {stakeSOL && (
-        <div style={s.escrowBox}>
-          {winner
-            ? `${winner.username} receives ${(parseFloat(stakeSOL) * players.length).toFixed(3)} SOL`
-            : `${stakeSOL} SOL returned to each player`}
+      {/* ── SOL Pot Breakdown ── */}
+      {isLockedIn && payouts && (
+        <div style={s.potBox}>
+          <div style={s.potTitle}>
+            💰 {totalPotSol ?? (stakeAmount * players.length / 1e9).toFixed(4)} SOL pot
+            {payoutsSimulated && <span style={s.simBadge}>simulated</span>}
+            {payoutTxSignature && (
+              <a
+                href={`https://explorer.solana.com/tx/${payoutTxSignature}?cluster=devnet`}
+                target="_blank"
+                rel="noreferrer"
+                style={s.txLink}
+              >
+                View tx ↗
+              </a>
+            )}
+          </div>
+          <div style={s.payoutRows}>
+            {payouts.map((p, i) => {
+              const rank = i + 1;
+              const medal = rank === 1 ? '🥇' : rank === 2 ? '🥈' : rank === 3 ? '🥉' : `#${rank}`;
+              const isWin = parseFloat(p.sol) > 0;
+              return (
+                <div key={p.username} style={s.payoutRow(isWin)}>
+                  <span style={{ fontSize: 18 }}>{medal}</span>
+                  <span style={{ fontWeight: 700, color: '#ddd6fe', flex: 1 }}>{p.username}</span>
+                  <span style={{ color: isWin ? '#4ade80' : '#666', fontWeight: 800, fontSize: 17 }}>
+                    {isWin ? `+${p.sol} SOL` : '—'}
+                  </span>
+                  <span style={{ color: '#555', fontSize: 12 }}>({(p.share * 100).toFixed(0)}%)</span>
+                </div>
+              );
+            })}
+          </div>
+          {winner && payoutByUsername[winner.username] && (
+            <div style={s.potVerdict}>
+              {winner.username} takes the pot —&nbsp;
+              <strong style={{ color: '#4ade80' }}>
+                {payoutByUsername[winner.username].sol} SOL
+              </strong>
+              {payoutsSimulated ? ' (simulated)' : ''}!
+            </div>
+          )}
         </div>
       )}
 
@@ -364,11 +465,25 @@ export function RecapScreen() {
       <div style={s.cardsRow}>
         {players.map((p) => {
           const isWinner = winner?.socketId === p.socketId;
+          const payout = payoutByUsername[p.username];
           return (
             <div key={p.socketId} style={s.card(isWinner)}>
               <div style={s.playerName}>{p.username}{isWinner ? ' 🏆' : ''}</div>
               <div style={s.bigScore}>{(p.sessionScore * 100).toFixed(1)}</div>
               <div style={s.bigScoreLabel}>composite score</div>
+
+              {payout && (
+                <div style={{
+                  textAlign: 'center',
+                  fontSize: 15,
+                  fontWeight: 800,
+                  color: parseFloat(payout.sol) > 0 ? '#4ade80' : '#666',
+                  marginTop: -4,
+                }}>
+                  {parseFloat(payout.sol) > 0 ? `+${payout.sol} SOL` : 'no SOL'}
+                  {payoutsSimulated && <span style={{ fontSize: 10, color: '#666', marginLeft: 4 }}>sim</span>}
+                </div>
+              )}
 
               <hr style={s.divider} />
               <ScoreBars player={p} />

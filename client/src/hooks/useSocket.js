@@ -17,6 +17,7 @@ export function useSocket() {
     setFocusStates,
     setScores,
     setCurrentQuestion,
+    clearCurrentQuestion,
     setSummary,
     showPetBubble,
     setNarratorManifest,
@@ -101,7 +102,9 @@ export function useSocket() {
     });
 
     socket.on('quiz-results', ({ scores }) => {
-      setScores(scores);
+      if (scores) setScores(scores);
+      // Clear stale question in case QuizOverlay wasn't mounted to do it
+      setTimeout(() => clearCurrentQuestion(), 3000);
     });
 
     socket.on('session_end', (summary) => {
@@ -185,6 +188,7 @@ export function useSocket() {
     setFocusStates,
     setScores,
     setCurrentQuestion,
+    clearCurrentQuestion,
     setSummary,
     patchSummary,
     setNarratorManifest,

@@ -38,7 +38,7 @@ const WEIGHTS_BY_COUNT = {
  * @param {{ walletAddress: string, compositeScore: number }[]} players
  * @returns {{ walletAddress: string, compositeScore: number, share: number }[]}
  */
-function computeShares(players) {
+export function computeShares(players) {
   const n = Math.min(players.length, 4);
 
   // Sort descending by composite score
