@@ -60,6 +60,10 @@ export function useFocusTracker({ onFocusChange, enabled = true }) {
             pitch: frames.reduce((s, f) => s + f.pitch, 0) / frames.length,
             yaw: frames.reduce((s, f) => s + f.yaw, 0) / frames.length,
           };
+        } else {
+          // Fallback when no face was captured during calibration window.
+          calibrationRef.current = { pitch: 0, yaw: 0 };
+          console.warn('[focusTracker] Calibration captured no face frames; using neutral center fallback.');
         }
         setCalibrating(false);
         setReady(true);

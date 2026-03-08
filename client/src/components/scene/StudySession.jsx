@@ -1,4 +1,4 @@
-import { Component, Suspense, useCallback, useEffect, useState } from 'react';
+import { Component, Suspense, useCallback, useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { Canvas } from '@react-three/fiber';
 import { OrbitControls, Html } from '@react-three/drei';
@@ -50,6 +50,7 @@ export function StudySession() {
   const playerSubjects = useGameStore((s) => s.playerSubjects);
   const studyStarted = useGameStore((s) => s.studyStarted);
   const setStudyStarted = useGameStore((s) => s.setStudyStarted);
+  const updateFocusState = useGameStore((s) => s.updateFocusState);
 
   const playerIndex = (room?.players ?? []).findIndex((p) => p.socketId === mySocketId);
 
@@ -68,9 +69,11 @@ export function StudySession() {
   const handleFocusChange = useCallback(
     (focused) => {
       if (!room?.code) return;
+      // Update local UI immediately; server only echoes focus_update to other players.
+      if (mySocketId) updateFocusState(mySocketId, focused);
       socket.emit('focus_update', { roomCode: room.code, focused });
     },
-    [room]
+    [room, mySocketId, updateFocusState]
   );
 
   const { videoRef, calibrating } = useFocusTracker({
@@ -99,6 +102,24 @@ export function StudySession() {
   const mySubject = playerSubjects[mySocketId] ?? null;
   const partnerSubject = partner ? (playerSubjects[partner.socketId] ?? null) : null;
 
+  // Trigger jump+audio+particles when a player loses focus
+  const [petAnims, setPetAnims] = useState({});
+  const prevFocusRef = useRef({});
+  useEffect(() => {
+    const prev = prevFocusRef.current;
+    const updates = {};
+    for (const [socketId, isFocused] of Object.entries(focusStates)) {
+      const wasFocused = prev[socketId] ?? true;
+      if (wasFocused && !isFocused) {
+        updates[socketId] = { animType: 'jump', key: Date.now() };
+      }
+    }
+    if (Object.keys(updates).length > 0) {
+      setPetAnims((p) => ({ ...p, ...updates }));
+    }
+    prevFocusRef.current = { ...focusStates };
+  }, [focusStates]);
+
   const [debugOpen, setDebugOpen] = useState(false);
   useEffect(() => {
     const handler = (e) => {
@@ -108,8 +129,7 @@ export function StudySession() {
     return () => window.removeEventListener('keydown', handler);
   }, []);
 
-  const { setContainerRef, pipActive, pipReady, enterPiP, pipWindow } = usePictureInPicture({ enabled: sceneReady });
-  const pipOverlayRoot = pipWindow?.document?.getElementById('pip-overlay-root');
+  const { setContainerRef, pipActive, pipReady, enterPiP, pipOverlayRoot } = usePictureInPicture({ enabled: sceneReady });
 
   return (
     <div style={{ width: '100vw', height: '100vh', position: 'relative' }}>
@@ -142,7 +162,7 @@ export function StudySession() {
                   <group key={player.socketId}>
                     <PetErrorBoundary fallback={<PetPlaceholder focused={focused} position={pos} />}>
                       <Suspense fallback={<PetPlaceholder focused={focused} position={pos} />}>
-                        <Pet species={species} focused={focused} position={pos} />
+                        <Pet species={species} focused={focused} position={pos} debugAnim={petAnims[player.socketId] ?? null} />
                       </Suspense>
                     </PetErrorBoundary>
 
@@ -216,9 +236,16 @@ export function StudySession() {
       )}
 
       {sceneReady && <SessionHUD myFocused={myFocused} partnerFocused={partnerFocused} />}
-      {sceneReady && currentQuestion && <QuizOverlay question={currentQuestion} />}
+      {currentQuestion && <QuizOverlay question={currentQuestion} />}
 
-      {pipOverlayRoot && currentQuestion && createPortal(<QuizOverlay question={currentQuestion} />, pipOverlayRoot)}
+      {pipOverlayRoot && currentQuestion && createPortal(
+        <QuizOverlay
+          question={currentQuestion}
+          compact
+          petSpecies={myPlayer ? (usernameToSpecies[myPlayer.username] ?? 'pikachu') : 'pikachu'}
+        />,
+        pipOverlayRoot
+      )}
 
       <div style={ov.statusStrip}>
         {screenEnabled && mySubject && <SubjectPill data={mySubject} label="You" isSelf />}
@@ -474,7 +501,7 @@ const ov = {
   },
   pipBtn: {
     position: 'absolute',
-    bottom: 16,
+    bottom: 64,
     right: 16,
     padding: '8px 16px',
     background: 'rgba(16,16,42,0.92)',

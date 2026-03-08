@@ -2,7 +2,7 @@ import { useEffect, useRef, useState, useCallback } from 'react';
 import { socket } from '../lib/socket.js';
 import { useGameStore } from '../store/gameStore.js';
 
-const CAPTURE_INTERVAL_MS = 15_000; // capture every 15s
+const CAPTURE_INTERVAL_MS = 5_000; // capture every 5s
 const PLAYER_STAGGER_MS = 3_000;
 const JPEG_QUALITY = 0.6;
 

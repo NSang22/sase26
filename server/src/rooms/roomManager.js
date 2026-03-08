@@ -81,6 +81,7 @@ class Room {
 
   canJoin() {
     if (this.mode === 'solo') return false; // solo rooms are private
+    if (this.mode === 'demo') return this.status === 'waiting' && this.players.size < MAX_PLAYERS;
     return this.status === 'waiting' && this.players.size < MAX_PLAYERS;
   }
 
@@ -552,6 +553,7 @@ class Room {
         focus_start_timestamp: p.focus_start_timestamp,
         total_focused_ms: p.total_focused_ms,
         walletConnected: !!p.walletAddress,
+        walletAddress: p.walletAddress ?? null,
         escrowConfirmed: p.escrowConfirmed,
       })),
     };

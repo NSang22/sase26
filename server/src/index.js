@@ -12,7 +12,7 @@ import { RoomManager } from './rooms/roomManager.js';
 import { QuizService } from './quiz/quizService.js';
 import { VoiceService, AUDIO_DIR } from './voice/voiceService.js';
 import { EscrowService } from './solana/escrowService.js';
-import { executeAtomicPayout } from './solana/payout.js';
+import { executeAtomicPayout, computeShares } from './solana/payout.js';
 import { mintSessionReputation } from './solana/mintReputation.js';
 import { ScreenAgent } from './services/screenAgent.js';
 import authRouter from './routes/auth.js';
@@ -21,7 +21,9 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
 
 dotenv.config();
 
-const CLIENT_ORIGIN = (process.env.CLIENT_URL || 'http://localhost:5173').replace(/\/$/, '');
+const CLIENT_ORIGIN = process.env.NODE_ENV === 'production'
+  ? (process.env.CLIENT_URL || 'http://localhost:5173').replace(/\/$/, '')
+  : true; // allow all origins in development for LAN multiplayer
 
 const app = express();
 const httpServer = createServer(app);
@@ -306,9 +308,9 @@ function scheduleNextQuiz(room) {
     // 'frequency' mode: quizValue is minutes between quizzes
     intervalSec = (room.quizValue || 5) * 60;
   }
-  // Solo mode: cap at 60s so quizzes come quickly for demo
-  if (room.mode === 'solo') {
-    intervalSec = Math.min(intervalSec, 60);
+  // Solo/demo mode: cap at 10s for quick demo
+  if (room.mode === 'solo' || room.mode === 'demo') {
+    intervalSec = Math.min(intervalSec, 10);
   }
   // For testing: respect QUIZ_MIN_INTERVAL env override
   const minInterval = parseInt(process.env.QUIZ_MIN_INTERVAL_S, 10) || 10;
@@ -521,27 +523,53 @@ async function endSession(room) {
   })().catch((err) => console.error('[endSession] DB error:', err.message));
 
   // â”€â”€ Background group 2: Solana payout + on-chain reputation minting â”€â”€â”€â”€â”€â”€â”€â”€â”€
-  // Only runs for locked-in mode; fires independently so it never delays recap.
+  // Runs for locked-in (real SOL) and demo (simulated) modes; never delays recap.
   (async () => {
-    if (roomMode !== 'locked-in' || !roomStakeAmount) return;
+    if ((roomMode !== 'locked-in' && roomMode !== 'demo') || !roomStakeAmount) return;
 
-    // â”€â”€ Rank-based proportional payout â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-    const payoutResult = await executeAtomicPayout({
-      players: summary.players.map((p) => ({
-        walletAddress:  p.walletAddress,
-        compositeScore: p.sessionScore, // 0â€“1 composite from room.getSummary()
-      })),
-      totalStakedLamports: roomStakeAmount * summary.players.length,
-      serverEscrowKeypair: escrowService.serverKeypair,
+    const totalPotLamports = roomStakeAmount * summary.players.length;
+    // Demo mode is always simulated; locked-in is simulated if any dev wallet used
+    const isSimulated = roomMode === 'demo' || summary.players.some((p) =>
+      !p.walletAddress || p.walletAddress.startsWith('dev-wallet-')
+    );
+
+    // Always compute rank-based shares so the recap screen can show them
+    const shares = computeShares(
+      summary.players.map((p) => ({
+        walletAddress:  p.walletAddress ?? p.socketId,
+        compositeScore: p.sessionScore,
+        username:       p.username,
+      }))
+    );
+    const computedPayouts = shares.map((p) => ({
+      walletAddress: p.walletAddress,
+      username:      p.username,
+      lamports:      Math.floor(p.share * totalPotLamports),
+      sol:           (Math.floor(p.share * totalPotLamports) / 1e9).toFixed(4),
+      share:         p.share,
+    }));
+
+    io.to(roomCode).emit('session_recap_update', {
+      payouts:          computedPayouts,
+      payoutsSimulated: isSimulated,
+      totalPotSol:      (totalPotLamports / 1e9).toFixed(4),
     });
 
-    if (payoutResult.success) {
-      io.to(roomCode).emit('session_recap_update', {
-        payoutTxSignature: payoutResult.signature,
-        payouts:           payoutResult.payouts,
+    // Real on-chain payout (skip if any dev wallet present)
+    if (!isSimulated) {
+      const payoutResult = await executeAtomicPayout({
+        players: summary.players.map((p) => ({
+          walletAddress:  p.walletAddress,
+          compositeScore: p.sessionScore,
+        })),
+        totalStakedLamports: totalPotLamports,
+        serverEscrowKeypair: escrowService.serverKeypair,
       });
-    } else {
-      console.error('[payout] Failed:', payoutResult.error);
+      if (payoutResult.success) {
+        io.to(roomCode).emit('session_recap_update', { payoutTxSignature: payoutResult.signature });
+      } else {
+        console.error('[payout] Failed:', payoutResult.error);
+      }
     }
 
     // â”€â”€ Mint BUDDY_WIN + BUDDY_XP reputation tokens â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
@@ -852,6 +880,17 @@ io.on('connection', (socket) => {
     }
   });
 
+  // dev_escrow_confirm (dev bypass - no on-chain verification)
+  socket.on('dev_escrow_confirm', ({ roomCode }) => {
+    const room = roomManager.getRoom(roomCode);
+    if (!room) return;
+    room.confirmEscrow(socket.id, 'dev-bypass-tx');
+    broadcastRoomState(room);
+    if (room.allEscrowConfirmed()) {
+      io.to(roomCode).emit('escrow_ready');
+    }
+  });
+
   // â”€â”€ close_room (host only) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   socket.on('close_room', ({ roomCode }) => {
     const room = roomManager.getRoom(roomCode);
@@ -908,7 +947,7 @@ io.on('connection', (socket) => {
 
 const PORT = process.env.PORT || 3001;
 connectDB().then(() => {
-  httpServer.listen(PORT, () => {
+  httpServer.listen(PORT, '0.0.0.0', () => {
     console.log(`Buddy Lock-In server â†’ http://localhost:${PORT}`);
     voiceService.preGenerateNarratorLines().catch((err) =>
       console.error('[voice] Startup narrator generation failed:', err.message)

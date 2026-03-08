@@ -190,8 +190,17 @@ const s = {
 };
 
 export function WaitingRoom() {
-  const { room, user, setPhase } = useGameStore();
+  const { room, user, setPhase, setWalletAddress } = useGameStore();
   const { walletAddress, isPhantomInstalled, connect, approveEscrow } = usePhantomWallet();
+
+  const connectDevWallet = () => {
+    const fakeAddr = `dev-wallet-${Date.now()}`;
+    setWalletAddress(fakeAddr);
+    if (room?.code) {
+      socket.emit('wallet_connected', { roomCode: room.code, walletAddress: fakeAddr });
+      socket.emit('dev_escrow_confirm', { roomCode: room.code });
+    }
+  };
   const fileRef = useRef();
   const [uploading, setUploading] = useState(false);
   const [uploadDone, setUploadDone] = useState(false);
@@ -209,6 +218,21 @@ export function WaitingRoom() {
   const [selectedMaterial, setSelectedMaterial] = useState(null);
   const [uploadTab, setUploadTab] = useState('upload'); // 'upload' | 'library'
   const [copied, setCopied] = useState(false);
+
+  // On-chain reputation: walletAddress -> { wins, totalXP, reputationScore }
+  const [reputations, setReputations] = useState({});
+  useEffect(() => {
+    if (!room?.players) return;
+    for (const p of room.players) {
+      if (!p.walletAddress || p.walletAddress.startsWith('dev-wallet-')) continue;
+      if (reputations[p.walletAddress] !== undefined) continue;
+      fetch(`/api/reputation/${p.walletAddress}`)
+        .then((r) => r.json())
+        .then((data) => setReputations((prev) => ({ ...prev, [p.walletAddress]: data })))
+        .catch(() => {});
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [room?.players]);
 
   // Canvas background
   const canvasRef = useRef(null);
@@ -499,14 +523,39 @@ export function WaitingRoom() {
         {room.players.map((p) => {
           const playerBuddy = Object.entries(takenBuddies).find(([, uname]) => uname === p.username)?.[0];
           const buddyColor = playerBuddy ? BUDDIES.find((b) => b.name === playerBuddy)?.color : null;
+          const rep = p.walletAddress ? reputations[p.walletAddress] : null;
+          const isDevWallet = p.walletAddress?.startsWith('dev-wallet-');
           return (
-            <div key={p.socketId} style={s.playerRow}>
-              <span style={{ fontFamily: "'Press Start 2P', monospace", fontSize: 8, color: '#CCC' }}>
-                {p.username}{p.isHost ? ' (host)' : ''}
-                {playerBuddy && (
-                  <span style={{ color: buddyColor, fontSize: 7 }}> [{playerBuddy}]</span>
+            <div key={p.socketId} style={{ ...s.playerRow, flexWrap: 'wrap', gap: 6 }}>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 3, flex: 1 }}>
+                <span style={{ fontFamily: "'Press Start 2P', monospace", fontSize: 8, color: '#CCC' }}>
+                  {p.username}{p.isHost ? ' (host)' : ''}
+                  {playerBuddy && (
+                    <span style={{ color: buddyColor, fontSize: 7 }}> [{playerBuddy}]</span>
+                  )}
+                </span>
+                {isLockedIn && p.walletAddress && (
+                  <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+                    {isDevWallet ? (
+                      <span style={{ fontSize: 9, color: '#fbbf24', fontFamily: 'monospace' }}>dev wallet</span>
+                    ) : rep ? (
+                      <>
+                        <span style={{ fontSize: 9, color: '#fbbf24', fontFamily: 'monospace' }}>
+                          🏆 {rep.wins}W
+                        </span>
+                        <span style={{ fontSize: 9, color: '#a78bfa', fontFamily: 'monospace' }}>
+                          ⚡ {rep.totalXP} XP
+                        </span>
+                        <span style={{ fontSize: 8, color: '#555', fontFamily: 'monospace' }}>
+                          on-chain
+                        </span>
+                      </>
+                    ) : (
+                      <span style={{ fontSize: 9, color: '#555', fontFamily: 'monospace' }}>loading rep...</span>
+                    )}
+                  </div>
                 )}
-              </span>
+              </div>
               <div style={{ display: 'flex', gap: 8 }}>
                 {isLockedIn && <span style={s.badge(p.escrowConfirmed)}>
                   {p.escrowConfirmed ? 'Escrowed' : 'Pending SOL'}
@@ -698,10 +747,11 @@ export function WaitingRoom() {
         {isHost ? (
           <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
             <div style={{ ...s.label, color: '#F8D030' }}>SESSION MODE</div>
-            <div style={{ display: 'flex', gap: 6 }}>
+            <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
               {[
-                { value: 'casual',    label: 'CASUAL',     color: '#68B868' },
-                { value: 'locked-in', label: 'â¬¡ LOCKED IN', color: '#E85050' },
+                { value: 'casual',    label: 'CASUAL',      color: '#68B868' },
+                { value: 'demo',      label: '\u26a1 DEMO',  color: '#F8D030' },
+                { value: 'locked-in', label: '\u2b21 LOCKED IN', color: '#E85050' },
               ].map(({ value, label, color }) => {
                 const active = mode === value;
                 return (
@@ -709,6 +759,12 @@ export function WaitingRoom() {
                     key={value}
                     onClick={() => {
                       setMode(value);
+                      if (value === 'demo') {
+                        setDuration(0.5);
+                        setQuizMode('frequency');
+                        setQuizValue(1);
+                        socket.emit('update_settings', { roomCode: room.code, duration: 0.5, quizMode: 'frequency', quizValue: 1 });
+                      }
                       socket.emit('update_mode', {
                         roomCode: room.code,
                         mode: value,
@@ -733,6 +789,20 @@ export function WaitingRoom() {
                 );
               })}
             </div>
+
+            {mode === 'demo' && (
+              <div style={{
+                fontFamily: "'Press Start 2P', monospace",
+                fontSize: 7,
+                color: '#F8D030',
+                padding: '6px 10px',
+                background: 'rgba(248,208,48,0.08)',
+                border: '1px solid rgba(248,208,48,0.3)',
+                borderRadius: 4,
+              }}>
+                \u26a1 30 sec session &bull; quiz every ~10s &bull; screenshot every 5s
+              </div>
+            )}
 
             {isLockedIn && (
               <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
@@ -782,8 +852,8 @@ export function WaitingRoom() {
             }}>
               <span style={{ fontFamily: "'Press Start 2P', monospace", fontSize: 7, color: '#8888BB' }}>
                 Mode:{' '}
-                <span style={{ color: isLockedIn ? '#E85050' : '#68B868' }}>
-                  {isLockedIn ? `Locked In (${effectiveStakeAmount.toFixed(2)} SOL)` : 'Casual'}
+                <span style={{ color: isLockedIn ? '#E85050' : effectiveMode === 'demo' ? '#F8D030' : '#68B868' }}>
+                  {isLockedIn ? `Locked In (${effectiveStakeAmount.toFixed(2)} SOL)` : effectiveMode === 'demo' ? '\u26a1 Demo (30s)' : 'Casual'}
                 </span>
               </span>
             </div>
@@ -935,9 +1005,18 @@ export function WaitingRoom() {
             <span>Stake:</span>
             <span style={s.tag}>{stakeSOL} SOL each</span>
             {!walletAddress ? (
-              <button style={{ ...s.subBtn, marginLeft: 'auto' }} onClick={connect}>
-                {isPhantomInstalled ? 'Connect Phantom' : 'Get Phantom â†’'}
-              </button>
+              <div style={{ marginLeft: 'auto', display: 'flex', gap: 8 }}>
+                <button style={s.subBtn} onClick={connect}>
+                  {isPhantomInstalled ? 'Connect Phantom' : 'Get Phantom â†’'}
+                </button>
+                <button
+                  style={{ ...s.subBtn, background: '#2a2a3a', border: '1px solid #555' }}
+                  onClick={connectDevWallet}
+                  title="Dev bypass — no Phantom required"
+                >
+                  Dev Solana
+                </button>
+              </div>
             ) : !myPlayer?.escrowConfirmed ? (
               <button style={{ ...s.subBtn, marginLeft: 'auto' }} onClick={handleApproveEscrow}>
                 Approve Escrow

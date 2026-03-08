@@ -465,7 +465,7 @@ export default function BuddyLockIn() {
                   letterSpacing: 1,
                 }}
               >
-                IF YOU LOSE FOCUS, YOUR PET FALLS ASLEEP
+                BET ON YOURSELF
               </p>
             </div>
 
