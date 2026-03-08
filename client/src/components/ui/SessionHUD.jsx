@@ -120,9 +120,11 @@ export function SessionHUD({ myFocused, partnerFocused }) {
         </div>
       </div>
 
-      <button style={s.endBtn} onClick={handleEnd}>
-        End Session
-      </button>
+      {me?.isHost && (
+        <button style={s.endBtn} onClick={handleEnd}>
+          End Session
+        </button>
+      )}
     </>
   );
 }
