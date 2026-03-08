@@ -8,12 +8,12 @@ export const POKEMON_SPRITES = {
     size: 32,
     name: 'Pikachu',
   },
-  eevee: {
-    color: '#C08850',
-    accent: '#F8E8C0',
-    cheeks: '#C08850',
+  jigglypuff: {
+    color: '#FFB8E0',
+    accent: '#68C8A0',
+    cheeks: '#FF6090',
     size: 32,
-    name: 'Eevee',
+    name: 'Jigglypuff',
   },
   bulbasaur: {
     color: '#68B868',
@@ -80,14 +80,25 @@ export function drawPixelPokemon(ctx, x, y, pokemon, frame, scale = 3) {
     fillRect(ctx, x + 14 * s, yOff + 4 * s, 2 * s, 2 * s);
     fillRect(ctx, x + 16 * s, yOff + 2 * s, 2 * s, 2 * s);
     fillRect(ctx, x + 16 * s, yOff + 0 * s, 3 * s, 2 * s);
-  } else if (pokemon === 'eevee') {
+  } else if (pokemon === 'jigglypuff') {
+    // Rounder pink body
+    ctx.fillStyle = p.color;
+    fillRect(ctx, x + 2 * s, yOff + 7 * s, 12 * s, 8 * s);
+    // Hair curl
+    ctx.fillStyle = '#FF90C0';
+    fillRect(ctx, x + 6 * s, yOff - 3 * s, 4 * s, 3 * s);
+    fillRect(ctx, x + 7 * s, yOff - 5 * s, 3 * s, 3 * s);
+    // Ear tufts
+    fillRect(ctx, x + 1 * s, yOff - 1 * s, 3 * s, 3 * s);
+    fillRect(ctx, x + 12 * s, yOff - 1 * s, 3 * s, 3 * s);
+    // Cheeks
+    ctx.fillStyle = p.cheeks;
+    fillRect(ctx, x + 1 * s, yOff + 5 * s, 2 * s, 2 * s);
+    fillRect(ctx, x + 13 * s, yOff + 5 * s, 2 * s, 2 * s);
+    // Big green eyes
     ctx.fillStyle = p.accent;
-    fillRect(ctx, x + 0 * s, yOff - 2 * s, 3 * s, 6 * s);
-    fillRect(ctx, x + 13 * s, yOff - 2 * s, 3 * s, 6 * s);
-    ctx.fillStyle = p.accent;
-    fillRect(ctx, x + 2 * s, yOff + 7 * s, 12 * s, 3 * s);
-    fillRect(ctx, x + 14 * s, yOff + 4 * s, 3 * s, 6 * s);
-    fillRect(ctx, x + 16 * s, yOff + 2 * s, 2 * s, 4 * s);
+    fillRect(ctx, x + 4 * s, yOff + 3 * s, 3 * s, 3 * s);
+    fillRect(ctx, x + 9 * s, yOff + 3 * s, 3 * s, 3 * s);
   } else if (pokemon === 'bulbasaur') {
     ctx.fillStyle = p.accent;
     fillRect(ctx, x + 4 * s, yOff - 2 * s, 8 * s, 4 * s);

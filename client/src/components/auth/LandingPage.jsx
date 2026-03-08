@@ -69,7 +69,7 @@ export default function BuddyLockIn() {
 
     const pokemonPositions = [
       { type: "pikachu", x: 80, baseY: 0 },
-      { type: "eevee", x: 220, baseY: 0 },
+      { type: "jigglypuff", x: 220, baseY: 0 },
       { type: "bulbasaur", x: 800, baseY: 0 },
       { type: "squirtle", x: 940, baseY: 0 },
       { type: "charmander", x: 520, baseY: 0 },

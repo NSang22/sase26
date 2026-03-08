@@ -16,7 +16,7 @@ import {
 
 const BUDDIES = [
   { name: 'Pikachu',   color: '#F8D030' },
-  { name: 'Eevee',     color: '#C08850' },
+  { name: 'Jigglypuff', color: '#FFB8E0' },
   { name: 'Bulbasaur', color: '#68B868' },
   { name: 'Squirtle',  color: '#58A8E8' },
   { name: 'Charmander',color: '#F08830' },
@@ -246,7 +246,7 @@ export function WaitingRoom() {
 
     const pokemonPositions = [
       { type: 'pikachu',    x: 80  },
-      { type: 'eevee',      x: 220 },
+      { type: 'jigglypuff', x: 220 },
       { type: 'bulbasaur',  x: 800 },
       { type: 'squirtle',   x: 940 },
       { type: 'charmander', x: 520 },
