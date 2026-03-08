@@ -1,8 +1,9 @@
 /**
  * Audio utilities for Buddy: Lock In
  *
- * Handles playback of server-served MP3 URLs (pre-generated via ElevenLabs).
- * Includes a simple queue to prevent overlapping pet voice lines.
+ * Two audio layers:
+ * 1. Narrator (ElevenLabs TTS) — quiz questions, recaps, alerts. Queued sequentially.
+ * 2. Pokémon SFX — short sound-effect clips from /audio/pokemon/. Can overlap with narrator.
  */
 
 let activeAudio = null;
@@ -38,9 +39,7 @@ function playNext() {
 }
 
 /**
- * Queue an audio URL for sequential playback.
- * @param {string} url - URL of the MP3 file (e.g. /audio/reactions/cat/focus-lost-2.mp3)
- * @param {{ priority?: boolean, onEnd?: () => void }} options
+ * Queue a narrator audio URL for sequential playback.
  */
 export function playAudio(url, { priority = false, onEnd } = {}) {
   if (!url) return;
@@ -54,7 +53,7 @@ export function playAudio(url, { priority = false, onEnd } = {}) {
 }
 
 /**
- * Stop current playback and flush the queue.
+ * Stop current narrator playback and flush the queue.
  */
 export function stopAudio() {
   if (activeAudio) {
@@ -67,8 +66,20 @@ export function stopAudio() {
 }
 
 /**
- * Play a quiz question audio clip (priority — interrupts pet chatter).
+ * Play a quiz question audio clip (priority — interrupts current narrator audio).
  */
 export function playQuestionAudio(url) {
   playAudio(url, { priority: true });
+}
+
+/**
+ * Play a Pokémon SFX clip. Fires independently of the narrator queue (can overlap).
+ * @param {string} pokemonType - e.g. 'pikachu', 'eevee', 'bulbasaur', 'squirtle', 'charmander'
+ */
+export function playPokemonSfx(pokemonType) {
+  if (!pokemonType) return;
+  const url = `/audio/pokemon/${pokemonType}.mp3`;
+  const sfx = new Audio(url);
+  sfx.volume = 0.5;
+  sfx.play().catch(() => {});
 }

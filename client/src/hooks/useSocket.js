@@ -1,7 +1,13 @@
 import { useEffect, useCallback } from 'react';
 import { socket, connectSocket } from '../lib/socket.js';
 import { useGameStore } from '../store/gameStore.js';
-import { playAudio, playQuestionAudio } from '../lib/audio.js';
+import { playAudio, playQuestionAudio, playPokemonSfx } from '../lib/audio.js';
+
+// Pet reaction text lines (matches server PET_REACTIONS)
+const PET_REACTIONS = {
+  'focus-lost': ["Huh?! Stay focused!", "Hey! Don't zone out!", "Come back!", "No slacking off!", "Focus!"],
+  'focus-regained': ["Welcome back!", "Let's go!", "That's the spirit!", "Locked in again!", "Back on track!"],
+};
 
 /**
  * Wires up all socket event listeners for the active session.
@@ -17,6 +23,10 @@ export function useSocket() {
     setScores,
     setCurrentQuestion,
     setSummary,
+    showPetBubble,
+    setNarratorManifest,
+    setScreenAnalysis,
+    setFakeFocusWarning,
   } = useGameStore();
 
   const emit = useCallback((event, data) => {
@@ -25,6 +35,12 @@ export function useSocket() {
 
   useEffect(() => {
     connectSocket();
+
+    // Fetch narrator manifest on connect
+    fetch('/api/audio/narrator')
+      .then((r) => r.ok ? r.json() : null)
+      .then((m) => { if (m) setNarratorManifest(m); })
+      .catch(() => {});
 
     socket.on('connect', () => {
       setMySocketId(socket.id);
@@ -39,16 +55,45 @@ export function useSocket() {
       setRoom(room);
     });
 
-    socket.on('session_start', ({ startTime }) => {
+    socket.on('session_start', ({ startTime, narratorAudioUrl }) => {
       useGameStore.getState().setSessionStartTime(startTime);
       setPhase('session');
+      // Play narrator "Trainers, lock in!" countdown
+      if (narratorAudioUrl) playAudio(narratorAudioUrl, { priority: true });
     });
 
-    // players[] is the live focus data array from getLiveFocusData()
-    socket.on('focus_update', ({ players }) => {
+    // Track previous focus to detect changes for SFX/bubbles
+    const prevFocus = {};
+
+    socket.on('focus_update', ({ playerId, focused, players }) => {
       const states = {};
       players.forEach((p) => { states[p.socketId] = p.focused; });
       setFocusStates(states);
+
+      // Detect focus *change* for the player who triggered this event
+      if (playerId && prevFocus[playerId] !== undefined && prevFocus[playerId] !== focused) {
+        const category = focused ? 'focus-regained' : 'focus-lost';
+        const lines = PET_REACTIONS[category];
+        const text = lines[Math.floor(Math.random() * lines.length)];
+        showPetBubble(playerId, text);
+
+        // Play Pokemon SFX for the player's pet
+        const room = useGameStore.getState().room;
+        const player = room?.players?.find?.((p) => p.socketId === playerId);
+        if (player?.pokemon) playPokemonSfx(player.pokemon);
+
+        // Play narrator focus alert if someone lost focus
+        if (!focused) {
+          const manifest = useGameStore.getState().narratorManifest;
+          const urls = manifest?.['focus-alert'];
+          if (urls?.length) {
+            const url = urls[Math.floor(Math.random() * urls.length)];
+            if (url) playAudio(url);
+          }
+        }
+      }
+      // Update tracking
+      players.forEach((p) => { prevFocus[p.socketId] = p.focused; });
     });
 
     // surprise-quiz: { question, windowMs }
@@ -67,6 +112,28 @@ export function useSocket() {
     socket.on('session_end', (summary) => {
       setSummary(summary);
       setPhase('recap');
+      // Play narrator session-end line
+      const manifest = useGameStore.getState().narratorManifest;
+      const urls = manifest?.['session-end'];
+      if (urls?.length) {
+        const url = urls[Math.floor(Math.random() * urls.length)];
+        if (url) playAudio(url);
+      }
+      // Play recap narration if available
+      if (summary.recapAudioUrl) {
+        setTimeout(() => playAudio(summary.recapAudioUrl), 2000);
+      }
+    });
+
+    // ── Screen analysis from server ────────────────────────────────────────
+    socket.on('screen-analysis', (data) => {
+      setScreenAnalysis(data);
+    });
+
+    socket.on('fake-focus', ({ distraction }) => {
+      setFakeFocusWarning(distraction);
+      const myId = useGameStore.getState().mySocketId;
+      if (myId) showPetBubble(myId, '🚨 I see you slacking!');
     });
 
     socket.on('player_left', ({ playerId }) => {
@@ -90,6 +157,8 @@ export function useSocket() {
       socket.off('surprise-quiz');
       socket.off('quiz-results');
       socket.off('session_end');
+      socket.off('screen-analysis');
+      socket.off('fake-focus');
       socket.off('player_left');
       socket.off('error');
       socket.off('escrow_ready');

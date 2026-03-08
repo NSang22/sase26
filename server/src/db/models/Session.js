@@ -27,6 +27,8 @@ const sessionSchema = new mongoose.Schema(
     winner: { type: String, default: null }, // userId
     stakeAmount: { type: Number, default: 0 },
     payoutTxSignature: { type: String, default: null },
+    studyReport: { type: mongoose.Schema.Types.Mixed, default: null },
+    screenTimelines: { type: mongoose.Schema.Types.Mixed, default: null },
   },
   { timestamps: true }
 );

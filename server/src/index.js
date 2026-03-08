@@ -11,6 +11,7 @@ import { RoomManager } from './rooms/roomManager.js';
 import { QuizService } from './quiz/quizService.js';
 import { VoiceService, AUDIO_DIR } from './voice/voiceService.js';
 import { EscrowService } from './solana/escrowService.js';
+import { ScreenAgent } from './services/screenAgent.js';
 import authRouter from './routes/auth.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -39,6 +40,7 @@ const roomManager = new RoomManager();
 const quizService = new QuizService();
 const voiceService = new VoiceService();
 const escrowService = new EscrowService();
+const screenAgent = new ScreenAgent();
 
 // ── REST routes ──────────────────────────────────────────────────────────────
 
@@ -61,7 +63,7 @@ async function handleQuizUpload(req, res) {
     room.quizIndex = 0; // reset in case of re-upload
 
     // Pre-generate TTS for each question in the background (non-blocking)
-    voiceService.preGenerateQuizAudio(questions, room.petSpecies).catch((err) =>
+    voiceService.preGenerateQuizAudio(questions).catch((err) =>
       console.error('[voice] preGenerateQuizAudio failed:', err.message)
     );
 
@@ -181,10 +183,10 @@ app.get('/api/bet/status/:roomCode', (req, res) => {
   res.json(getBetStatus(room));
 });
 
-// Returns pre-generated reaction URLs grouped by species → category → index[]
+// Returns pre-generated narrator URLs grouped by category → index[]
 // Client uses this on mount to know which files exist before events fire.
-app.get('/api/audio/reactions', (_req, res) => {
-  res.json(voiceService.getReactionManifest());
+app.get('/api/audio/narrator', (_req, res) => {
+  res.json(voiceService.getNarratorManifest());
 });
 
 app.get('/api/leaderboard', async (_req, res) => {
@@ -194,6 +196,23 @@ app.get('/api/leaderboard', async (_req, res) => {
 });
 
 app.use('/api', authRouter);
+
+// Stub: return user's previous uploaded materials (empty for now)
+app.get('/api/users/materials', (_req, res) => {
+  res.json([]);
+});
+
+// Stub: reuse a previous material in a room
+app.post('/api/rooms/:code/material/reuse', (_req, res) => {
+  res.status(501).json({ error: 'Not implemented yet' });
+});
+
+// Screen analysis timeline for all players in a room
+app.get('/api/session/:roomCode/timeline', (req, res) => {
+  const room = roomManager.getRoom(req.params.roomCode);
+  if (!room) return res.status(404).json({ error: 'Room not found' });
+  res.json(room.getAllTimelines());
+});
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -215,7 +234,9 @@ function shouldStartSession(room) {
 
 function startSession(room) {
   room.startSession();
-  io.to(room.code).emit('session_start', { startTime: room.startTime });
+  // Include narrator session-start audio URL
+  const narratorAudioUrl = voiceService.getNarratorUrl('session-start');
+  io.to(room.code).emit('session_start', { startTime: room.startTime, narratorAudioUrl });
   scheduleNextQuiz(room);
   console.log(`[room:${room.code}] Session started with ${room.players.size} players`);
 }
@@ -350,6 +371,8 @@ async function endSession(room) {
       endTime: new Date(room.endTime),
       winner: summary.winner?.userId ?? null,
       stakeAmount: room.stakeAmount,
+      studyReport: summary.studyReport ?? null,
+      screenTimelines: room.getAllTimelines(),
     });
   } catch (err) {
     console.error('[endSession] Session save failed:', err.message);
@@ -358,6 +381,53 @@ async function endSession(room) {
   // ── Solana payout ───────────────────────────────────────────────────────────
   const payoutTx = await escrowService.handleSessionPayout(summary);
   if (payoutTx) summary.payoutTxSignature = payoutTx;
+
+  // ── Screen-based concept quiz (from screen captures, not PDF) ─────────────
+  try {
+    // Gather all unique concepts across all players
+    const allConcepts = [];
+    for (const p of room.players.values()) {
+      for (const c of p.screenConcepts) {
+        if (!allConcepts.includes(c)) allConcepts.push(c);
+      }
+    }
+    if (allConcepts.length > 0) {
+      const conceptQuiz = await screenAgent.generateConceptQuiz(allConcepts);
+      summary.conceptQuiz = conceptQuiz;
+      console.log(`[screen] Generated ${conceptQuiz.length} concept quiz questions from ${allConcepts.length} concepts`);
+    }
+  } catch (err) {
+    console.error('[screen] Concept quiz generation failed:', err.message);
+  }
+
+  // ── Study report from screen timelines ────────────────────────────────────
+  try {
+    const allTimeline = [];
+    for (const p of room.players.values()) {
+      for (const entry of p.screenTimeline) {
+        allTimeline.push({ ...entry, username: p.username });
+      }
+    }
+    allTimeline.sort((a, b) => a.timestamp - b.timestamp);
+    if (allTimeline.length > 0) {
+      const studyReport = await screenAgent.generateStudyReport(allTimeline);
+      summary.studyReport = studyReport;
+      console.log('[screen] Study report generated');
+    }
+  } catch (err) {
+    console.error('[screen] Study report generation failed:', err.message);
+  }
+
+  // ── Generate recap narration (ElevenLabs) ─────────────────────────────────
+  try {
+    const recapText = summary.players
+      .map((p) => `${p.username}: ${(p.focusPercent * 100).toFixed(0)}% focus, ${(p.quizAccuracy * 100).toFixed(0)}% quiz accuracy.`)
+      .join(' ') + (summary.winner ? ` The winner is ${summary.winner.username}!` : ' It\'s a tie!');
+    const recapUrl = await voiceService.generateRecapAudio(recapText, room.code);
+    if (recapUrl) summary.recapAudioUrl = recapUrl;
+  } catch (err) {
+    console.error('[voice] Recap audio generation failed:', err.message);
+  }
 
   io.to(room.code).emit('session_end', summary);
   roomManager.removeRoom(room.code);
@@ -401,6 +471,54 @@ io.on('connection', (socket) => {
     if (shouldStartSession(room)) startSession(room);
   });
 
+  // ── player_unready ───────────────────────────────────────────────────────
+  socket.on('player_unready', ({ roomCode }) => {
+    const room = roomManager.getRoom(roomCode);
+    if (!room || room.status !== 'waiting') return;
+    room.setUnready(socket.id);
+    broadcastRoomState(room);
+  });
+
+  // ── select_buddy ─────────────────────────────────────────────────────────
+  socket.on('select_buddy', ({ roomCode, buddy }) => {
+    const room = roomManager.getRoom(roomCode);
+    if (!room) return;
+    room.selectBuddy(socket.id, buddy);
+    io.to(roomCode).emit('buddy_update', room.buddySelections);
+  });
+
+  // ── update_settings (host only) ──────────────────────────────────────────
+  socket.on('update_settings', ({ roomCode, duration, quizMode, quizValue }) => {
+    const room = roomManager.getRoom(roomCode);
+    if (!room || room.status !== 'waiting') return;
+    const player = room.players.get(socket.id);
+    if (!player?.isHost) return;
+    room.updateSettings(duration, quizMode, quizValue);
+    io.to(roomCode).emit('settings_updated', { duration, quizMode, quizValue });
+  });
+
+  // ── update_mode (host only) ──────────────────────────────────────────────
+  socket.on('update_mode', ({ roomCode, mode, stakeAmount }) => {
+    const room = roomManager.getRoom(roomCode);
+    if (!room || room.status !== 'waiting') return;
+    const player = room.players.get(socket.id);
+    if (!player?.isHost) return;
+    room.updateMode(mode, stakeAmount);
+    io.to(roomCode).emit('mode_updated', { mode, stakeAmount });
+    broadcastRoomState(room);
+  });
+
+  // ── start_session (host explicit) ────────────────────────────────────────
+  socket.on('start_session', ({ roomCode }) => {
+    const room = roomManager.getRoom(roomCode);
+    if (!room || room.status !== 'waiting') return;
+    const player = room.players.get(socket.id);
+    if (!player?.isHost) return;
+    if (!room.allReady()) return;
+    if (room.mode === 'locked-in' && !room.allEscrowConfirmed()) return;
+    startSession(room);
+  });
+
   // ── focus_update ─────────────────────────────────────────────────────────
   // Client emits: { roomCode, focused: boolean }
   // Server broadcasts to all OTHER players: { playerId, focused, players[] }
@@ -425,6 +543,46 @@ io.on('connection', (socket) => {
       focused,
       players: focusData,
     });
+  });
+
+  // ── screen-capture ───────────────────────────────────────────────────────
+  // Client emits: { roomCode, image: base64string, mimeType? }
+  // Server analyzes via Gemini Vision, stores result, detects fake focus
+  socket.on('screen-capture', async ({ roomCode, image, mimeType }) => {
+    const room = roomManager.getRoom(roomCode);
+    if (!room || !room.active) return;
+
+    const player = room.players.get(socket.id);
+    if (!player) return;
+
+    try {
+      const analysis = await screenAgent.analyzeScreen(image, mimeType || 'image/png');
+      room.recordScreenAnalysis(socket.id, analysis);
+
+      // Send analysis back to the capturing player
+      socket.emit('screen-analysis', analysis);
+
+      // Fake-focus detection: MediaPipe says focused but screen says not studying
+      if (player.focused && !analysis.is_studying) {
+        room.updateFocus(socket.id, false);
+        const now = Date.now();
+        const focusData = room.getLiveFocusData(now);
+        io.to(roomCode).emit('fake-focus', {
+          playerId: socket.id,
+          distraction: analysis.distraction,
+          players: focusData,
+        });
+        // Also emit a normal focus_update so HUD/rings update
+        io.to(roomCode).emit('focus_update', {
+          playerId: socket.id,
+          focused: false,
+          players: focusData,
+        });
+        console.log(`[screen] Fake focus detected for ${player.username}: ${analysis.distraction}`);
+      }
+    } catch (err) {
+      console.error(`[screen] Analysis failed for ${player.username}:`, err.message);
+    }
   });
 
   // ── quiz_answer ──────────────────────────────────────────────────────────
@@ -521,8 +679,8 @@ const PORT = process.env.PORT || 3001;
 connectDB().then(() => {
   httpServer.listen(PORT, () => {
     console.log(`Buddy Lock-In server → http://localhost:${PORT}`);
-    voiceService.preGenerateReactions().catch((err) =>
-      console.error('[voice] Startup reaction generation failed:', err.message)
+    voiceService.preGenerateNarratorLines().catch((err) =>
+      console.error('[voice] Startup narrator generation failed:', err.message)
     );
   });
 });
