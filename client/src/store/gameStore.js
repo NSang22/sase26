@@ -43,6 +43,7 @@ export const useGameStore = create((set, get) => ({
   // ── Recap ─────────────────────────────────────────────────────────────────
   summary: null,
   setSummary: (summary) => set({ summary }),
+  patchSummary: (patch) => set((s) => ({ summary: s.summary ? { ...s.summary, ...patch } : patch })),
 
   // ── Screen analysis ────────────────────────────────────────────────────────
   screenAnalysis: null, // latest { is_studying, subject, key_concepts, distraction, bloom_max_level }

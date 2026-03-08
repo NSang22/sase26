@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from "react";
+﻿import { useState, useEffect, useRef } from "react";
 import { useGameStore } from "../../store/gameStore.js";
 import { socket } from "../../lib/socket.js";
 import {
@@ -60,7 +60,7 @@ export default function BuddyLockIn() {
 
     const pokemonPositions = [
       { type: "pikachu", x: 80, baseY: 0 },
-      { type: "eevee", x: 220, baseY: 0 },
+      { type: "jigglypuff", x: 220, baseY: 0 },
       { type: "bulbasaur", x: 800, baseY: 0 },
       { type: "squirtle", x: 940, baseY: 0 },
       { type: "charmander", x: 520, baseY: 0 },
@@ -156,14 +156,14 @@ export default function BuddyLockIn() {
     return () => cancelAnimationFrame(animId);
   }, []);
 
-  // Pokeball battle transition: circle wipe close → pokeball → circle wipe open
+  // Pokeball battle transition: circle wipe close â†’ pokeball â†’ circle wipe open
   const triggerTransition = (targetScreen) => {
-    setTransitionPhase("closing"); // clip-path animates from 150% → 0% over 300ms
+    setTransitionPhase("closing"); // clip-path animates from 150% â†’ 0% over 300ms
     setTimeout(() => {
       setTransitionPhase("pokeball"); // fully closed; change screen now
       setScreen(targetScreen);
       setTimeout(() => {
-        setTransitionPhase("opening"); // clip-path animates from 0% → 150% over 300ms
+        setTransitionPhase("opening"); // clip-path animates from 0% â†’ 150% over 300ms
         setTimeout(() => {
           setTransitionPhase("idle");
         }, 300);
@@ -192,7 +192,7 @@ export default function BuddyLockIn() {
     socket.once("room_created", (roomData) => {
       setUser({ username });
       setRoom(roomData);
-      // Emit start_session immediately — solo rooms need no waiting room
+      // Emit start_session immediately â€” solo rooms need no waiting room
       socket.emit("start_session", { roomCode: roomData.code });
       socket.once("session_start", () => {
         setPhase("session");
@@ -323,7 +323,7 @@ export default function BuddyLockIn() {
         }}
       />
 
-      {/* Pokeball transition — dark backdrop */}
+      {/* Pokeball transition â€” dark backdrop */}
       {transitionPhase === "pokeball" && (
         <div
           style={{
@@ -336,7 +336,7 @@ export default function BuddyLockIn() {
         />
       )}
 
-      {/* Pokeball transition — pokeball icon */}
+      {/* Pokeball transition â€” pokeball icon */}
       {transitionPhase === "pokeball" && (
         <div
           style={{
@@ -396,7 +396,7 @@ export default function BuddyLockIn() {
         </div>
       )}
 
-      {/* UI Layer — clip-path drives the circle wipe animation */}
+      {/* UI Layer â€” clip-path drives the circle wipe animation */}
       <div
         style={{
           position: "relative",
@@ -511,7 +511,7 @@ export default function BuddyLockIn() {
                 marginTop: 20,
               }}
             >
-              v0.1.0 — HACKATHON BUILD
+              v0.1.0 â€” HACKATHON BUILD
             </p>
           </div>
         )}

@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect } from 'react';
+﻿import { useState, useRef, useEffect } from 'react';
 import axios from 'axios';
 import { useGameStore } from '../../store/gameStore.js';
 import { socket } from '../../lib/socket.js';
@@ -12,17 +12,17 @@ import {
   drawGround,
 } from '../../lib/pixelArt.js';
 
-// ── Pokemon buddy data ────────────────────────────────────────────────────────
+// â”€â”€ Pokemon buddy data â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 const BUDDIES = [
   { name: 'Pikachu',   color: '#F8D030' },
-  { name: 'Eevee',     color: '#C08850' },
+  { name: 'Jigglypuff', color: '#FFB8E0' },
   { name: 'Bulbasaur', color: '#68B868' },
   { name: 'Squirtle',  color: '#58A8E8' },
   { name: 'Charmander',color: '#F08830' },
 ];
 
-// ── Animated mini canvas for each buddy card ─────────────────────────────────
+// â”€â”€ Animated mini canvas for each buddy card â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 function BuddyMiniCanvas({ type, greyed }) {
   const canvasRef = useRef(null);
@@ -55,7 +55,7 @@ function BuddyMiniCanvas({ type, greyed }) {
   );
 }
 
-// ── Pixel art styles ──────────────────────────────────────────────────────────
+// â”€â”€ Pixel art styles â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 const s = {
   root: {
@@ -246,7 +246,7 @@ export function WaitingRoom() {
 
     const pokemonPositions = [
       { type: 'pikachu',    x: 80  },
-      { type: 'eevee',      x: 220 },
+      { type: 'jigglypuff', x: 220 },
       { type: 'bulbasaur',  x: 800 },
       { type: 'squirtle',   x: 940 },
       { type: 'charmander', x: 520 },
@@ -701,7 +701,7 @@ export function WaitingRoom() {
             <div style={{ display: 'flex', gap: 6 }}>
               {[
                 { value: 'casual',    label: 'CASUAL',     color: '#68B868' },
-                { value: 'locked-in', label: '⬡ LOCKED IN', color: '#E85050' },
+                { value: 'locked-in', label: 'â¬¡ LOCKED IN', color: '#E85050' },
               ].map(({ value, label, color }) => {
                 const active = mode === value;
                 return (
@@ -798,7 +798,7 @@ export function WaitingRoom() {
               <div style={{ ...s.tag, textAlign: 'center' }}>Quiz bank generated!</div>
             ) : (
               <>
-                {/* Tabs — only rendered when there are previous materials */}
+                {/* Tabs â€” only rendered when there are previous materials */}
                 {materials.length > 0 && (
                   <div style={{ display: 'flex', gap: 6 }}>
                     {[
@@ -936,7 +936,7 @@ export function WaitingRoom() {
             <span style={s.tag}>{stakeSOL} SOL each</span>
             {!walletAddress ? (
               <button style={{ ...s.subBtn, marginLeft: 'auto' }} onClick={connect}>
-                {isPhantomInstalled ? 'Connect Phantom' : 'Get Phantom →'}
+                {isPhantomInstalled ? 'Connect Phantom' : 'Get Phantom â†’'}
               </button>
             ) : !myPlayer?.escrowConfirmed ? (
               <button style={{ ...s.subBtn, marginLeft: 'auto' }} onClick={handleApproveEscrow}>
