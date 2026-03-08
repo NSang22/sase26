@@ -92,4 +92,25 @@ router.get('/profile/:username', async (req, res) => {
   }
 });
 
+// GET /api/profile/:username/history — split solo vs competitive sessions
+router.get('/profile/:username/history', async (req, res) => {
+  try {
+    const user = await User.findOne({ username: req.params.username }).lean();
+    if (!user) return res.status(404).json({ error: 'User not found' });
+
+    const userId = user._id.toString();
+    const sessions = await Session.find({ participants: userId })
+      .sort({ createdAt: -1 })
+      .limit(50)
+      .lean();
+
+    const solo = sessions.filter((s) => s.mode === 'solo');
+    const competitive = sessions.filter((s) => s.mode !== 'solo');
+    res.json({ solo, competitive });
+  } catch (err) {
+    console.error('[auth] history error:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
 export default router;

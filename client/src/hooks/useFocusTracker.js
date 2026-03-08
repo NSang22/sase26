@@ -3,6 +3,7 @@ import { FaceLandmarker, FilesetResolver } from '@mediapipe/tasks-vision';
 
 const YAW_THRESHOLD = 25;   // degrees from calibrated center
 const PITCH_THRESHOLD = 25;
+const DETECT_INTERVAL_MS = 250; // 4 Hz — works in background tabs (setInterval)
 const MEDIAPIPE_WASM = 'https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@latest/wasm';
 const FACE_LANDMARKER_MODEL =
   'https://storage.googleapis.com/mediapipe-models/face_landmarker/face_landmarker/float16/1/face_landmarker.task';
@@ -11,13 +12,16 @@ const FACE_LANDMARKER_MODEL =
  * Runs MediaPipe Face Landmarker in the browser via webcam.
  * Emits `onFocusChange(focused: boolean)` on state transitions.
  *
+ * Uses setInterval (not requestAnimationFrame) so detection continues
+ * when the app tab is backgrounded and the user is on their study tab.
+ *
  * @param {{ onFocusChange: (focused: boolean) => void, enabled?: boolean }} options
  * @returns {{ videoRef: React.RefObject, calibrating: boolean, ready: boolean }}
  */
 export function useFocusTracker({ onFocusChange, enabled = true }) {
   const videoRef = useRef(null);
   const landmarkerRef = useRef(null);
-  const animFrameRef = useRef(null);
+  const intervalRef = useRef(null);
   const focusedRef = useRef(true);
   const calibrationRef = useRef(null);
   const calibrationFramesRef = useRef([]);
@@ -47,9 +51,9 @@ export function useFocusTracker({ onFocusChange, enabled = true }) {
       await video.play();
 
       setCalibrating(true);
-      let calibrating = true;
+      let isCalibrating = true;
       setTimeout(() => {
-        calibrating = false;
+        isCalibrating = false;
         if (calibrationFramesRef.current.length > 0) {
           const frames = calibrationFramesRef.current;
           calibrationRef.current = {
@@ -61,8 +65,12 @@ export function useFocusTracker({ onFocusChange, enabled = true }) {
         setReady(true);
       }, 3000);
 
-      const detect = () => {
-        if (!landmarkerRef.current || !video) return;
+      // Use setInterval instead of requestAnimationFrame so detection
+      // continues when the app tab is in the background (user on study tab).
+      // Browsers throttle setInterval to ~1 Hz in background tabs, which
+      // is still enough for focus tracking.
+      intervalRef.current = setInterval(() => {
+        if (!landmarkerRef.current || !video || video.readyState < 2) return;
 
         const results = landmarkerRef.current.detectForVideo(video, performance.now());
 
@@ -72,7 +80,7 @@ export function useFocusTracker({ onFocusChange, enabled = true }) {
           const pitch = Math.asin(-m[6]) * (180 / Math.PI);
           const yaw = Math.atan2(m[2], m[10]) * (180 / Math.PI);
 
-          if (calibrating) {
+          if (isCalibrating) {
             calibrationFramesRef.current.push({ pitch, yaw });
           } else if (calibrationRef.current) {
             const center = calibrationRef.current;
@@ -85,18 +93,14 @@ export function useFocusTracker({ onFocusChange, enabled = true }) {
               onFocusChange?.(focused);
             }
           }
-        } else if (!calibrating && calibrationRef.current) {
+        } else if (!isCalibrating && calibrationRef.current) {
           // No face detected → not focused
           if (focusedRef.current) {
             focusedRef.current = false;
             onFocusChange?.(false);
           }
         }
-
-        animFrameRef.current = requestAnimationFrame(detect);
-      };
-
-      animFrameRef.current = requestAnimationFrame(detect);
+      }, DETECT_INTERVAL_MS);
     } catch (err) {
       console.error('[focusTracker] Failed to start:', err.message);
     }
@@ -106,7 +110,7 @@ export function useFocusTracker({ onFocusChange, enabled = true }) {
     if (!enabled) return;
     startTracking();
     return () => {
-      if (animFrameRef.current) cancelAnimationFrame(animFrameRef.current);
+      if (intervalRef.current) clearInterval(intervalRef.current);
       const stream = videoRef.current?.srcObject;
       if (stream) stream.getTracks().forEach((t) => t.stop());
       landmarkerRef.current?.close();

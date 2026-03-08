@@ -8,9 +8,15 @@ const playerResultSchema = new mongoose.Schema(
     quizAccuracy: { type: Number, default: 0 },   // 0–1
     quizCorrectCount: { type: Number, default: 0 },
     totalQuizPoints: { type: Number, default: 0 },
-    sessionScore: { type: Number, default: 0 },   // 0.8*focus + 0.2*quiz
+    sessionScore: { type: Number, default: 0 },
+    responseTimeScore: { type: Number, default: 0 },
+    consistencyScore: { type: Number, default: 0 },
+    screenStudyPercent: { type: Number, default: 0 },
+    questionsTotal: { type: Number, default: 0 },
     xpGained: { type: Number, default: 0 },
-    newLevel: { type: Number, default: null },     // non-null if player leveled up
+    newLevel: { type: Number, default: null },
+    studyReport: { type: mongoose.Schema.Types.Mixed, default: null }, // per-player report
+    conceptQuiz: { type: mongoose.Schema.Types.Mixed, default: null }, // per-player end quiz
   },
   { _id: false }
 );

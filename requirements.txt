@@ -1,0 +1,55 @@
+# ============================================================
+# Buddy! Lock In — Project Requirements
+# ============================================================
+
+# ── Prerequisites ────────────────────────────────────────────
+# Node.js >= 18.x
+# npm >= 9.x
+# MongoDB Atlas connection string (MONGO_URI in .env)
+# Google Gemini API key (GEMINI_API_KEY in .env)
+
+# ── Server Dependencies (server/) ────────────────────────────
+@google/generative-ai ^0.21.0
+@solana/web3.js ^1.87.6
+axios ^1.6.2
+bcrypt ^5.1.1
+cors ^2.8.5
+dotenv ^16.3.1
+express ^4.18.2
+jsonwebtoken ^9.0.2
+mongoose ^8.0.3
+multer ^1.4.5-lts.1
+pdf-parse ^1.1.1
+socket.io ^4.7.2
+nodemon ^3.0.2 (dev)
+
+# ── Client Dependencies (client/) ────────────────────────────
+@mediapipe/tasks-vision ^0.10.8
+@react-three/drei ^9.88.17
+@react-three/fiber ^8.15.11
+@solana/web3.js ^1.87.6
+axios ^1.6.2
+react ^18.2.0
+react-dom ^18.2.0
+react-router-dom ^6.21.0
+socket.io-client ^4.7.2
+three ^0.159.0
+zustand ^4.4.7
+@vitejs/plugin-react ^4.2.1 (dev)
+vite ^5.0.8 (dev)
+
+# ── Environment Variables (.env in server/) ──────────────────
+# MONGO_URI=<mongodb+srv connection string>
+# GEMINI_API_KEY=<Google Gemini API key>
+# JWT_SECRET=<random secret for auth tokens>
+# ELEVENLABS_API_KEY=<ElevenLabs TTS key>
+# SOLANA_PRIVATE_KEY=<server wallet private key>
+# PORT=3001
+
+# ── Quick Start ──────────────────────────────────────────────
+# 1. cd server && npm install
+# 2. cd client && npm install
+# 3. Create server/.env with the variables above
+# 4. cd server && npm run dev
+# 5. cd client && npm run dev
+# 6. Open http://localhost:5173

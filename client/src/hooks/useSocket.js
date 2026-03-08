@@ -27,6 +27,7 @@ export function useSocket() {
     setNarratorManifest,
     setScreenAnalysis,
     setFakeFocusWarning,
+    setPlayerSubject,
   } = useGameStore();
 
   const emit = useCallback((event, data) => {
@@ -48,7 +49,8 @@ export function useSocket() {
 
     socket.on('room_created', (room) => {
       setRoom(room);
-      setPhase('waiting');
+      // Navigation to 'waiting' is handled by LandingPage's socket.once('room_created')
+      // which also calls setUser — don't race it by changing phase here
     });
 
     socket.on('room_update', (room) => {
@@ -57,6 +59,7 @@ export function useSocket() {
 
     socket.on('session_start', ({ startTime, narratorAudioUrl }) => {
       useGameStore.getState().setSessionStartTime(startTime);
+      useGameStore.setState({ screenShareResolved: false, studyStarted: false }); // reset so modals show for new session
       setPhase('session');
       // Play narrator "Trainers, lock in!" countdown
       if (narratorAudioUrl) playAudio(narratorAudioUrl, { priority: true });
@@ -98,6 +101,8 @@ export function useSocket() {
 
     // surprise-quiz: { question, windowMs }
     socket.on('surprise-quiz', ({ question }) => {
+      console.log('[quiz] Received surprise-quiz:', question?.id, question?.question?.substring(0, 60));
+      console.log('[quiz] sceneReady check — screenShareResolved:', useGameStore.getState().screenShareResolved, 'studyStarted:', useGameStore.getState().studyStarted);
       setCurrentQuestion(question);
       if (question.audioUrl) playQuestionAudio(question.audioUrl);
     });
@@ -128,16 +133,35 @@ export function useSocket() {
     // ── Screen analysis from server ────────────────────────────────────────
     socket.on('screen-analysis', (data) => {
       setScreenAnalysis(data);
+      // Also update our own entry in the shared subject map
+      const myId = useGameStore.getState().mySocketId;
+      if (myId) setPlayerSubject(myId, data);
     });
 
-    socket.on('fake-focus', ({ distraction }) => {
-      setFakeFocusWarning(distraction);
+    // Subject update broadcast — keep every player's current subject visible to the room
+    socket.on('subject_update', ({ socketId, subject, is_studying, distraction }) => {
+      setPlayerSubject(socketId, { subject, is_studying, distraction });
+    });
+
+    socket.on('fake-focus', ({ playerId, distraction }) => {
       const myId = useGameStore.getState().mySocketId;
-      if (myId) showPetBubble(myId, '🚨 I see you slacking!');
+      if (playerId === myId) {
+        // It's us — show the "we can see your screen" warning
+        setFakeFocusWarning(distraction);
+        if (myId) showPetBubble(myId, 'Caught slacking!');
+      } else {
+        // Someone else got caught — show a bubble on their pet
+        if (playerId) showPetBubble(playerId, `Distracted: ${distraction || 'off-task'}`);
+      }
     });
 
     socket.on('player_left', ({ playerId }) => {
       console.warn('[socket] Player left:', playerId);
+    });
+
+    socket.on('room_closed', () => {
+      useGameStore.getState().setRoom(null);
+      setPhase('login');
     });
 
     socket.on('error', ({ message }) => {
@@ -158,12 +182,14 @@ export function useSocket() {
       socket.off('quiz-results');
       socket.off('session_end');
       socket.off('screen-analysis');
+      socket.off('subject_update');
       socket.off('fake-focus');
       socket.off('player_left');
+      socket.off('room_closed');
       socket.off('error');
       socket.off('escrow_ready');
     };
-  }, [setMySocketId, setRoom, setPhase, updateFocusState, setFocusStates, setScores, setCurrentQuestion, setSummary]);
+  }, [setMySocketId, setRoom, setPhase, updateFocusState, setFocusStates, setScores, setCurrentQuestion, setSummary, setScreenAnalysis, setFakeFocusWarning, setPlayerSubject, showPetBubble]);
 
   return { emit, socket };
 }

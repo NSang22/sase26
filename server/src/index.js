@@ -6,6 +6,7 @@ import dotenv from 'dotenv';
 import multer from 'multer';
 import { join, dirname } from 'path';
 import { fileURLToPath } from 'url';
+import { randomUUID } from 'crypto';
 import { connectDB } from './db/mongoose.js';
 import { RoomManager } from './rooms/roomManager.js';
 import { QuizService } from './quiz/quizService.js';
@@ -165,7 +166,7 @@ app.post('/api/bet/verify', async (req, res) => {
   const allConfirmed = room.allEscrowConfirmed();
   if (allConfirmed) {
     io.to(roomCode).emit('escrow_ready');
-    if (shouldStartSession(room)) startSession(room);
+    // Host must still click START SESSION — no auto-start
   }
 
   res.json({ confirmed: true, allConfirmed, status: getBetStatus(room) });
@@ -207,11 +208,33 @@ app.post('/api/rooms/:code/material/reuse', (_req, res) => {
   res.status(501).json({ error: 'Not implemented yet' });
 });
 
-// Screen analysis timeline for all players in a room
+// Screen analysis timeline for all players in a room (live, from in-memory room)
 app.get('/api/session/:roomCode/timeline', (req, res) => {
   const room = roomManager.getRoom(req.params.roomCode);
   if (!room) return res.status(404).json({ error: 'Room not found' });
   res.json(room.getAllTimelines());
+});
+
+// Per-player study reports — served from MongoDB after session ends
+app.get('/api/session/:roomCode/report', async (req, res) => {
+  try {
+    const { Session } = await import('./db/models/Session.js');
+    const session = await Session.findOne({ roomCode: req.params.roomCode })
+      .sort({ createdAt: -1 })
+      .lean();
+    if (!session) return res.status(404).json({ error: 'Session not found' });
+    // Return per-player study reports extracted from the players array
+    const reports = {};
+    for (const p of session.players ?? []) {
+      reports[p.username] = {
+        studyReport: p.studyReport ?? null,
+        conceptQuiz: p.conceptQuiz ?? null,
+      };
+    }
+    res.json(reports);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
 });
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
@@ -242,36 +265,122 @@ function startSession(room) {
 }
 
 const QUIZ_ANSWER_WINDOW_MS = 30_000; // players have 30s to answer
+const QUIZ_DEFAULT_INTERVAL_S = 30;   // default seconds between quizzes
 
+/**
+ * Schedule a personalized quiz round for the room.
+ *
+ * quizMode 'frequency' → quizValue is minutes between quizzes (e.g. 5 = every 5 min)
+ * quizMode 'total'     → quizValue is total quiz count for the session
+ *                         interval = sessionDuration / quizValue
+ */
 function scheduleNextQuiz(room) {
-  if (!room.quizBank.length || room.quizIndex >= room.quizBank.length) return;
-
-  const delayMs = (5 + Math.random() * 5) * 60 * 1000; // 5–10 min random interval
-  room.quizTimer = setTimeout(() => {
+  let intervalSec;
+  if (room.quizMode === 'total' && room.quizValue) {
+    // Spread N quizzes evenly across the session duration (minutes → seconds)
+    const sessionSec = (room.duration || 25) * 60;
+    intervalSec = Math.round(sessionSec / room.quizValue);
+  } else {
+    // 'frequency' mode: quizValue is minutes between quizzes
+    intervalSec = (room.quizValue || 5) * 60;
+  }
+  // Solo mode: cap at 60s so quizzes come quickly for demo
+  if (room.mode === 'solo') {
+    intervalSec = Math.min(intervalSec, 60);
+  }
+  // For testing: respect QUIZ_MIN_INTERVAL env override
+  const minInterval = parseInt(process.env.QUIZ_MIN_INTERVAL_S, 10) || 10;
+  intervalSec = Math.max(minInterval, intervalSec);
+  // Add ±20% jitter so quizzes don't feel robotic
+  const jitter = intervalSec * 0.2 * (Math.random() * 2 - 1);
+  const delayMs = Math.max(10_000, (intervalSec + jitter) * 1000);
+  console.log(`[quiz] Next quiz for room ${room.code} in ${Math.round(delayMs / 1000)}s (interval: ${intervalSec}s, mode: ${room.quizMode}, value: ${room.quizValue})`);
+  room.quizTimer = setTimeout(async () => {
     if (!room.active) return;
 
-    const question = room.quizBank[room.quizIndex++];
-    room.setActiveQuestion(question);
+    const bloomLevel = room.getNextBloomLevel();
+    const roundId = randomUUID();
+    const playerQuestions = new Map(); // socketId -> question
 
-    // Emit to ALL players simultaneously so everyone sees the same question
-    io.to(room.code).emit('surprise-quiz', {
-      question,
-      windowMs: QUIZ_ANSWER_WINDOW_MS,
-    });
-    console.log(`[quiz] surprise-quiz fired in room ${room.code}: "${question.question.slice(0, 60)}..."`);
+    // Try to generate personalized questions for each player with concepts
+    for (const [socketId, player] of room.players) {
+      if (!player.screenConcepts.length) continue;
+      try {
+        const q = await screenAgent.generatePersonalizedQuestion(player.screenConcepts, bloomLevel);
+        if (q) playerQuestions.set(socketId, q);
+      } catch (err) {
+        console.error(`[quiz] Personalized question gen failed for ${player.username}:`, err.message);
+      }
+    }
 
-    // After 30s, close the question and broadcast results regardless of who answered
-    const timeoutId = setTimeout(() => {
-      closeQuestion(room, question.id);
-    }, QUIZ_ANSWER_WINDOW_MS);
-    room.answerTimeouts.set(question.id, timeoutId);
+    if (playerQuestions.size > 0) {
+      // ── Personalized round ──────────────────────────────────────────────
+      room.startPersonalizedRound(roundId, playerQuestions, bloomLevel);
 
-    // Schedule the next quiz after this one resolves
+      // Emit personalized question to each player individually (staggered 500ms to spread load)
+      let delay = 0;
+      for (const [socketId, q] of playerQuestions) {
+        setTimeout(() => {
+          console.log(`[quiz] Emitting surprise-quiz to ${socketId}, question: "${q.question?.substring(0, 60)}"`);
+          io.to(socketId).emit('surprise-quiz', {
+            // Attach roundId and personalized flag directly on the question object
+            // so the client QuizOverlay can match quiz-results events by roundId
+            question: { ...q, roundId, personalized: true },
+            windowMs: QUIZ_ANSWER_WINDOW_MS,
+            personalized: true,
+            bloomLevel,
+          });
+        }, delay);
+        delay += 500;
+      }
+
+      console.log(
+        `[quiz] Personalized round ${roundId} fired in room ${room.code} ` +
+        `(${playerQuestions.size} players, bloom: ${bloomLevel})`
+      );
+
+      // Close the round after window expires
+      room.roundAnswerTimeout = setTimeout(() => {
+        closePersonalizedRound(room);
+      }, QUIZ_ANSWER_WINDOW_MS);
+
+    } else if (room.quizBank.length && room.quizIndex < room.quizBank.length) {
+      // ── Fallback: PDF quiz bank (shared question for all players) ───────
+      const question = room.quizBank[room.quizIndex++];
+      room.setActiveQuestion(question);
+      io.to(room.code).emit('surprise-quiz', {
+        question,
+        windowMs: QUIZ_ANSWER_WINDOW_MS,
+        personalized: false,
+      });
+      console.log(`[quiz] PDF fallback quiz in room ${room.code}: "${question.question.slice(0, 60)}..."`);
+
+      const timeoutId = setTimeout(() => closeQuestion(room, question.id), QUIZ_ANSWER_WINDOW_MS);
+      room.answerTimeouts.set(question.id, timeoutId);
+    } else {
+      console.log(`[quiz] No concepts and no quiz bank for room ${room.code} — skipping round`);
+    }
+
+    // Schedule the next round regardless
     scheduleNextQuiz(room);
   }, delayMs);
 }
 
-/** Broadcast results for a question and clear its tracking state. */
+/** Close a personalized round and broadcast aggregated results. */
+function closePersonalizedRound(room) {
+  if (room.roundAnswerTimeout) {
+    clearTimeout(room.roundAnswerTimeout);
+    room.roundAnswerTimeout = null;
+  }
+  if (!room.currentRoundId) return;
+
+  const results = room.getRoundResults();
+  io.to(room.code).emit('quiz-results', results);
+  console.log(`[quiz] Personalized round ${room.currentRoundId} closed in room ${room.code}`);
+  room.currentRoundId = null;
+}
+
+/** Close a PDF quiz-bank question and broadcast results. */
 function closeQuestion(room, questionId) {
   const timeoutId = room.answerTimeouts.get(questionId);
   if (timeoutId) {
@@ -330,14 +439,17 @@ async function endSession(room) {
         user.lastSessionDate = new Date();
         await user.save();
 
-        await Leaderboard.upsertFromSession(p.userId, p.username, {
-          focusPercent: p.focusPercent,
-          quizAccuracy: p.quizAccuracy,
-          won: summary.winner?.userId === p.userId,
-          durationMs: summary.duration,
-          petSpecies: user.petSpecies,
-          petLevel: user.petLevel,
-        });
+        // Solo mode doesn't affect leaderboard rankings
+        if (room.mode !== 'solo') {
+          await Leaderboard.upsertFromSession(p.userId, p.username, {
+            focusPercent: p.focusPercent,
+            quizAccuracy: p.quizAccuracy,
+            won: summary.winner?.userId === p.userId,
+            durationMs: summary.duration,
+            petSpecies: user.petSpecies,
+            petLevel: user.petLevel,
+          });
+        }
       }
     } catch (err) {
       console.error(`[endSession] XP update failed for ${p.userId}:`, err.message);
@@ -347,9 +459,13 @@ async function endSession(room) {
       userId: p.userId,
       username: p.username,
       focusPercent: p.focusPercent,
+      screenStudyPercent: p.screenStudyPercent,
       quizAccuracy: p.quizAccuracy,
       quizCorrectCount: p.quizCorrectCount,
+      questionsTotal: p.questionsTotal,
       totalQuizPoints: p.totalQuizPoints,
+      responseTimeScore: p.responseTimeScore,
+      consistencyScore: p.consistencyScore,
       sessionScore: p.sessionScore,
       xpGained,
       newLevel,
@@ -362,60 +478,75 @@ async function endSession(room) {
 
   // ── Persist session ─────────────────────────────────────────────────────────
   try {
+    // Merge per-player reports into the playerResults array before saving
+    const playersWithReports = playerResults.map((pr) => {
+      const sp = summary.players.find((p) => p.userId === pr.userId);
+      return {
+        ...pr,
+        studyReport: sp?.studyReport ?? null,
+        conceptQuiz: sp?.conceptQuiz ?? null,
+      };
+    });
+
     await Session.create({
       roomCode: room.code,
       mode: room.mode,
       participants: summary.players.map((p) => p.userId),
-      players: playerResults,
+      players: playersWithReports,
       startTime: new Date(room.startTime),
       endTime: new Date(room.endTime),
       winner: summary.winner?.userId ?? null,
       stakeAmount: room.stakeAmount,
-      studyReport: summary.studyReport ?? null,
       screenTimelines: room.getAllTimelines(),
     });
   } catch (err) {
     console.error('[endSession] Session save failed:', err.message);
   }
 
-  // ── Solana payout ───────────────────────────────────────────────────────────
-  const payoutTx = await escrowService.handleSessionPayout(summary);
-  if (payoutTx) summary.payoutTxSignature = payoutTx;
-
-  // ── Screen-based concept quiz (from screen captures, not PDF) ─────────────
-  try {
-    // Gather all unique concepts across all players
-    const allConcepts = [];
-    for (const p of room.players.values()) {
-      for (const c of p.screenConcepts) {
-        if (!allConcepts.includes(c)) allConcepts.push(c);
-      }
-    }
-    if (allConcepts.length > 0) {
-      const conceptQuiz = await screenAgent.generateConceptQuiz(allConcepts);
-      summary.conceptQuiz = conceptQuiz;
-      console.log(`[screen] Generated ${conceptQuiz.length} concept quiz questions from ${allConcepts.length} concepts`);
-    }
-  } catch (err) {
-    console.error('[screen] Concept quiz generation failed:', err.message);
+  // ── Solana payout (skipped for solo and casual modes) ──────────────────────
+  if (room.mode === 'locked-in') {
+    const payoutTx = await escrowService.handleSessionPayout(summary);
+    if (payoutTx) summary.payoutTxSignature = payoutTx;
   }
 
-  // ── Study report from screen timelines ────────────────────────────────────
-  try {
-    const allTimeline = [];
-    for (const p of room.players.values()) {
-      for (const entry of p.screenTimeline) {
-        allTimeline.push({ ...entry, username: p.username });
+  // ── Per-player concept quiz + study report (from screen captures) ─────────
+  // Run all players in parallel to minimize end-of-session latency
+  const playerReportMap = new Map(); // socketId -> { conceptQuiz, studyReport }
+  await Promise.all(
+    [...room.players.values()].map(async (p) => {
+      const reports = { conceptQuiz: null, studyReport: null };
+
+      // 1. Concept quiz — 5 questions from this player's accumulated concepts
+      if (p.screenConcepts.length > 0) {
+        try {
+          reports.conceptQuiz = await screenAgent.generateConceptQuiz(p.screenConcepts);
+          console.log(
+            `[screen] ${reports.conceptQuiz.length} concept quiz questions for ${p.username}`
+          );
+        } catch (err) {
+          console.error(`[screen] Concept quiz failed for ${p.username}:`, err.message);
+        }
       }
-    }
-    allTimeline.sort((a, b) => a.timestamp - b.timestamp);
-    if (allTimeline.length > 0) {
-      const studyReport = await screenAgent.generateStudyReport(allTimeline);
-      summary.studyReport = studyReport;
-      console.log('[screen] Study report generated');
-    }
-  } catch (err) {
-    console.error('[screen] Study report generation failed:', err.message);
+
+      // 2. Study report — personalized from this player's timeline
+      if (p.screenTimeline.length > 0) {
+        try {
+          reports.studyReport = await screenAgent.generateStudyReport(p.screenTimeline);
+          console.log(`[screen] Study report generated for ${p.username}`);
+        } catch (err) {
+          console.error(`[screen] Study report failed for ${p.username}:`, err.message);
+        }
+      }
+
+      playerReportMap.set(p.socketId, reports);
+    })
+  );
+
+  // Attach per-player reports to summary players so recap screen can show them
+  for (const sp of summary.players) {
+    const reports = playerReportMap.get(sp.socketId) ?? {};
+    sp.conceptQuiz = reports.conceptQuiz ?? null;
+    sp.studyReport = reports.studyReport ?? null;
   }
 
   // ── Generate recap narration (ElevenLabs) ─────────────────────────────────
@@ -455,6 +586,8 @@ io.on('connection', (socket) => {
       return socket.emit('error', { message: 'Room not found, full, or already in progress' });
     }
     socket.join(roomCode);
+    // Send the full room state directly to the joiner
+    socket.emit('room_joined', room.getState());
     // Broadcast updated player list to everyone including the new joiner
     broadcastRoomState(room);
     console.log(`[room:${roomCode}] ${username} joined (${room.players.size}/${room.getState().maxPlayers})`);
@@ -467,8 +600,7 @@ io.on('connection', (socket) => {
 
     room.setReady(socket.id);
     broadcastRoomState(room); // everyone sees the updated ready state
-
-    if (shouldStartSession(room)) startSession(room);
+    // Session start is explicit — host clicks START SESSION button
   });
 
   // ── player_unready ───────────────────────────────────────────────────────
@@ -485,6 +617,7 @@ io.on('connection', (socket) => {
     if (!room) return;
     room.selectBuddy(socket.id, buddy);
     io.to(roomCode).emit('buddy_update', room.buddySelections);
+    broadcastRoomState(room);
   });
 
   // ── update_settings (host only) ──────────────────────────────────────────
@@ -495,6 +628,7 @@ io.on('connection', (socket) => {
     if (!player?.isHost) return;
     room.updateSettings(duration, quizMode, quizValue);
     io.to(roomCode).emit('settings_updated', { duration, quizMode, quizValue });
+    broadcastRoomState(room);
   });
 
   // ── update_mode (host only) ──────────────────────────────────────────────
@@ -515,6 +649,7 @@ io.on('connection', (socket) => {
     const player = room.players.get(socket.id);
     if (!player?.isHost) return;
     if (!room.allReady()) return;
+    // Solo rooms skip escrow check entirely
     if (room.mode === 'locked-in' && !room.allEscrowConfirmed()) return;
     startSession(room);
   });
@@ -559,8 +694,16 @@ io.on('connection', (socket) => {
       const analysis = await screenAgent.analyzeScreen(image, mimeType || 'image/png');
       room.recordScreenAnalysis(socket.id, analysis);
 
-      // Send analysis back to the capturing player
+      // Send full analysis back to the capturing player
       socket.emit('screen-analysis', analysis);
+
+      // Broadcast subject update to all room members so everyone can see each other's subject
+      io.to(roomCode).emit('subject_update', {
+        socketId: socket.id,
+        subject: analysis.subject,
+        is_studying: analysis.is_studying,
+        distraction: analysis.distraction,
+      });
 
       // Fake-focus detection: MediaPipe says focused but screen says not studying
       if (player.focused && !analysis.is_studying) {
@@ -587,29 +730,43 @@ io.on('connection', (socket) => {
 
   // ── quiz_answer ──────────────────────────────────────────────────────────
   // Client emits: { roomCode, questionId, answerIndex: 0-3, timeMs }
-  // Server:
-  //   1. Records answer and scores it
-  //   2. Sends a private ack back to the answering player
-  //   3. If all players have answered → closes question immediately and
-  //      broadcasts quiz-results to everyone
+  // Routes to personalized-round handler or PDF quiz-bank handler based on
+  // which map the questionId is found in.
   socket.on('quiz_answer', ({ roomCode, questionId, answerIndex, timeMs }) => {
     const room = roomManager.getRoom(roomCode);
     if (!room || !room.active) return;
 
-    const result = room.recordAnswer(socket.id, questionId, answerIndex, timeMs);
-    if (!result) return; // duplicate answer or unknown question — ignore
+    if (room.personalizedQuestions.has(questionId)) {
+      // ── Personalized round answer ────────────────────────────────────
+      const result = room.recordPersonalizedAnswer(socket.id, questionId, answerIndex, timeMs);
+      if (!result) return;
 
-    // Private ack: tell this player whether they were right
-    socket.emit('quiz-answer-ack', {
-      questionId,
-      correct: result.correct,
-      points: result.points,
-      correctAnswerIndex: result.correctAnswerIndex,
-    });
+      socket.emit('quiz-answer-ack', {
+        questionId,
+        correct: result.correct,
+        points: result.points,
+        correctAnswerIndex: result.correctAnswerIndex,
+      });
 
-    // If all players answered early, resolve immediately (don't wait for timeout)
-    if (room.allPlayersAnswered(questionId)) {
-      closeQuestion(room, questionId);
+      // If all players in this round answered early, close immediately
+      if (room.allRoundAnswered()) {
+        closePersonalizedRound(room);
+      }
+    } else {
+      // ── PDF quiz-bank answer ─────────────────────────────────────────
+      const result = room.recordAnswer(socket.id, questionId, answerIndex, timeMs);
+      if (!result) return;
+
+      socket.emit('quiz-answer-ack', {
+        questionId,
+        correct: result.correct,
+        points: result.points,
+        correctAnswerIndex: result.correctAnswerIndex,
+      });
+
+      if (room.allPlayersAnswered(questionId)) {
+        closeQuestion(room, questionId);
+      }
     }
   });
 
@@ -636,9 +793,28 @@ io.on('connection', (socket) => {
 
     if (room.allEscrowConfirmed()) {
       io.to(roomCode).emit('escrow_ready');
-      // Auto-start if everyone is also marked ready
-      if (shouldStartSession(room)) startSession(room);
+      // Host must still click START SESSION — no auto-start
     }
+  });
+
+  // ── close_room (host only) ────────────────────────────────────────────────
+  socket.on('close_room', ({ roomCode }) => {
+    const room = roomManager.getRoom(roomCode);
+    if (!room) return;
+    const player = room.players.get(socket.id);
+    if (!player?.isHost) return;
+
+    // Notify everyone in the room
+    io.to(roomCode).emit('room_closed', { reason: 'Host closed the room' });
+
+    // Remove all players from the socket room and clean up
+    for (const [sid] of room.players) {
+      const s = io.sockets.sockets.get(sid);
+      if (s) s.leave(roomCode);
+      roomManager.playerRooms.delete(sid);
+    }
+    roomManager.removeRoom(roomCode);
+    console.log(`[room] Room ${roomCode} closed by host ${player.username}`);
   });
 
   // ── end_session ──────────────────────────────────────────────────────────
