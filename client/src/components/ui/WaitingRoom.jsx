@@ -198,15 +198,17 @@ export function WaitingRoom() {
   const [ready, setReady] = useState(false);
   const [error, setError] = useState('');
   const [selectedBuddy, setSelectedBuddy] = useState(null);
-  const [takenBuddies, setTakenBuddies] = useState({});
-  const [duration, setDuration] = useState(25);
-  const [quizMode, setQuizMode] = useState('frequency');
-  const [quizValue, setQuizValue] = useState(5);
-  const [mode, setMode] = useState('casual');
-  const [stakeAmount, setStakeAmount] = useState(0.1);
+  const [takenBuddies, setTakenBuddies] = useState(room?.buddySelections || {});
+  const [duration, setDuration] = useState(room?.duration ?? 25);
+  const [quizMode, setQuizMode] = useState(room?.quizMode || 'frequency');
+  const [quizValue, setQuizValue] = useState(room?.quizValue ?? 5);
+  const [mode, setMode] = useState(room?.mode || 'casual');
+  const [stakeAmount, setStakeAmount] = useState(room?.stakeAmount ? room.stakeAmount / 1e9 : 0.1);
   const [materials, setMaterials] = useState([]);
   const [selectedMaterial, setSelectedMaterial] = useState(null);
   const [uploadTab, setUploadTab] = useState('upload'); // 'upload' | 'library'
+  const [startError, setStartError] = useState('');
+  const [codeCopied, setCodeCopied] = useState(false);
 
   // Canvas background
   const canvasRef = useRef(null);
@@ -437,7 +439,30 @@ export function WaitingRoom() {
 
       <div style={s.title}>Waiting Room</div>
 
-      <div style={s.code}>{room.code}</div>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 12, position: 'relative', zIndex: 10 }}>
+        <div style={s.code}>{room.code}</div>
+        <button
+          onClick={() => {
+            navigator.clipboard.writeText(room.code);
+            setCodeCopied(true);
+            setTimeout(() => setCodeCopied(false), 1500);
+          }}
+          style={{
+            fontFamily: "'Press Start 2P', monospace",
+            fontSize: 8,
+            padding: '5px 12px',
+            background: codeCopied ? '#F8D030' : 'transparent',
+            color: codeCopied ? '#222' : '#F8D030',
+            border: '2px solid rgba(248,208,48,0.6)',
+            borderRadius: 4,
+            cursor: 'pointer',
+            boxShadow: '0 0 6px rgba(248,208,48,0.2)',
+            transition: 'background 0.2s, color 0.2s',
+          }}
+        >
+          {codeCopied ? 'COPIED!' : 'COPY'}
+        </button>
+      </div>
       <div style={s.label}>Share this code with your partner</div>
 
       <div style={s.card}>
@@ -899,67 +924,86 @@ export function WaitingRoom() {
         {/* Bottom action button */}
         {isHost ? (() => {
           const enoughPlayers = room.players.length >= 2;
-          const othersReady = enoughPlayers && room.players.filter((p) => p.socketId !== socket.id).every((p) => p.ready);
-          const canStart = ready && enoughPlayers && othersReady;
-          const statusText = !ready
-            ? ''
-            : !enoughPlayers
+          const allReady = enoughPlayers && room.players.every((p) => p.ready);
+          const allEscrowConfirmed = room.players.every((p) => p.escrowConfirmed);
+          const canStart = allReady && (!isLockedIn || allEscrowConfirmed);
+          const solPending = isLockedIn && allReady && !allEscrowConfirmed;
+          const statusText = !enoughPlayers
             ? 'NEED AT LEAST 2 PLAYERS'
-            : !othersReady
+            : !allReady
             ? 'WAITING FOR ALL PLAYERS TO READY UP'
+            : solPending
+            ? 'WAITING FOR SOL...'
             : 'ALL PLAYERS READY!';
-          const statusColor = canStart ? '#68B868' : '#444466';
+          const statusColor = canStart ? '#68B868' : solPending ? '#F8D030' : '#444466';
           return (
             <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 8 }}>
-              {!ready ? (
-                <button
-                  onClick={() => {
+              <button
+                onClick={() => {
+                  if (ready) {
+                    socket.emit('player_unready', { roomCode: room.code });
+                    setReady(false);
+                  } else {
                     socket.emit('player_ready', { roomCode: room.code });
                     setReady(true);
-                  }}
-                  style={{
-                    fontFamily: "'Press Start 2P', monospace",
-                    fontSize: 10,
-                    padding: '12px 24px',
-                    background: '#68B868',
-                    color: '#fff',
-                    border: 'none',
-                    borderRadius: 4,
-                    cursor: 'pointer',
-                    letterSpacing: 1,
-                    boxShadow: '0 4px 0 #3d7a3d, 0 0 12px rgba(104,184,104,0.3)',
-                    textShadow: '0 2px 4px rgba(0,0,0,0.4)',
-                    width: '100%',
-                  }}
-                >
-                  READY UP
-                </button>
+                  }
+                }}
+                style={{
+                  fontFamily: "'Press Start 2P', monospace",
+                  fontSize: 10,
+                  padding: '12px 24px',
+                  background: ready ? '#E85050' : '#68B868',
+                  color: '#fff',
+                  border: 'none',
+                  borderRadius: 4,
+                  cursor: 'pointer',
+                  letterSpacing: 1,
+                  boxShadow: ready
+                    ? '0 4px 0 #8B2020, 0 0 12px rgba(232,80,80,0.3)'
+                    : '0 4px 0 #3d7a3d, 0 0 12px rgba(104,184,104,0.3)',
+                  textShadow: '0 2px 4px rgba(0,0,0,0.4)',
+                  width: '100%',
+                }}
+              >
+                {ready ? 'UNREADY' : 'READY UP'}
+              </button>
+              <button
+                disabled={!canStart && !solPending}
+                onClick={() => {
+                  if (solPending) {
+                    setStartError('ALL PLAYERS NEED TO LINK SOL FIRST!');
+                    setTimeout(() => setStartError(''), 3000);
+                    return;
+                  }
+                  socket.emit('start_session', { roomCode: room.code });
+                }}
+                style={{
+                  fontFamily: "'Press Start 2P', monospace",
+                  fontSize: 10,
+                  padding: '12px 24px',
+                  background: canStart ? '#68B868' : solPending ? '#F8D030' : '#1a1a2e',
+                  color: canStart ? '#fff' : solPending ? '#0A0A2E' : '#555',
+                  border: 'none',
+                  borderRadius: 4,
+                  cursor: canStart || solPending ? 'pointer' : 'not-allowed',
+                  opacity: canStart || solPending ? 1 : 0.4,
+                  letterSpacing: 1,
+                  boxShadow: canStart
+                    ? '0 4px 0 #3d7a3d, 0 0 12px rgba(104,184,104,0.4)'
+                    : solPending
+                    ? '0 4px 0 #B8860B, 0 0 12px rgba(248,208,48,0.4)'
+                    : 'none',
+                  textShadow: canStart || solPending ? '0 1px 0 rgba(0,0,0,0.3)' : 'none',
+                  width: '100%',
+                }}
+              >
+                START SESSION
+              </button>
+              {startError ? (
+                <span style={{ fontFamily: "'Press Start 2P', monospace", fontSize: 6, color: '#E85050' }}>
+                  {startError}
+                </span>
               ) : (
-                <button
-                  disabled={!canStart}
-                  onClick={() => socket.emit('start_session', { roomCode: room.code })}
-                  style={{
-                    fontFamily: "'Press Start 2P', monospace",
-                    fontSize: 10,
-                    padding: '12px 24px',
-                    background: canStart ? '#F8D030' : '#1a1a2e',
-                    color: canStart ? '#0A0A2E' : '#555',
-                    border: 'none',
-                    borderRadius: 4,
-                    cursor: canStart ? 'pointer' : 'not-allowed',
-                    opacity: canStart ? 1 : 0.4,
-                    letterSpacing: 1,
-                    boxShadow: canStart
-                      ? '0 4px 0 #B8860B, 0 0 12px rgba(248,208,48,0.4)'
-                      : 'none',
-                    textShadow: canStart ? '0 1px 0 rgba(0,0,0,0.3)' : 'none',
-                    width: '100%',
-                  }}
-                >
-                  START SESSION
-                </button>
-              )}
-              {statusText && (
                 <span style={{ fontFamily: "'Press Start 2P', monospace", fontSize: 6, color: statusColor }}>
                   {statusText}
                 </span>

@@ -18,16 +18,18 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
 
 dotenv.config();
 
+const CLIENT_ORIGIN = (process.env.CLIENT_URL || 'http://localhost:5173').replace(/\/$/, '');
+
 const app = express();
 const httpServer = createServer(app);
 const io = new Server(httpServer, {
   cors: {
-    origin: process.env.CLIENT_URL || 'http://localhost:5173',
+    origin: CLIENT_ORIGIN,
     methods: ['GET', 'POST'],
   },
 });
 
-app.use(cors({ origin: process.env.CLIENT_URL || 'http://localhost:5173' }));
+app.use(cors({ origin: CLIENT_ORIGIN }));
 app.use(express.json());
 
 // Serve pre-generated audio files (reactions + quiz TTS)
@@ -455,7 +457,8 @@ io.on('connection', (socket) => {
       return socket.emit('error', { message: 'Room not found, full, or already in progress' });
     }
     socket.join(roomCode);
-    // Broadcast updated player list to everyone including the new joiner
+    // Tell the joiner they're in, then broadcast the updated state to everyone
+    socket.emit('room_joined', room.getState());
     broadcastRoomState(room);
     console.log(`[room:${roomCode}] ${username} joined (${room.players.size}/${room.getState().maxPlayers})`);
   });
@@ -467,8 +470,6 @@ io.on('connection', (socket) => {
 
     room.setReady(socket.id);
     broadcastRoomState(room); // everyone sees the updated ready state
-
-    if (shouldStartSession(room)) startSession(room);
   });
 
   // ── player_unready ───────────────────────────────────────────────────────

@@ -21,7 +21,6 @@ export default function BuddyLockIn() {
   const [hoveredBtn, setHoveredBtn] = useState(null);
   const [transitionPhase, setTransitionPhase] = useState("idle"); // idle | closing | pokeball | opening
   const [username, setUsername] = useState("");
-  const [copied, setCopied] = useState(false);
   const [showUsernameError, setShowUsernameError] = useState(false);
   const { setPhase, setRoom, setUser } = useGameStore();
 
@@ -525,63 +524,6 @@ export default function BuddyLockIn() {
             >
               YOUR ROOM
             </h2>
-
-            {/* Room Code Display */}
-            <div
-              style={{
-                backgroundColor: "rgba(0,0,0,0.4)",
-                padding: "16px 32px",
-                borderRadius: 8,
-                border: "2px dashed rgba(248,208,48,0.4)",
-                display: "flex",
-                alignItems: "center",
-                gap: 12,
-              }}
-            >
-              <p
-                style={{
-                  fontFamily: "'Press Start 2P', monospace",
-                  fontSize: 32,
-                  color: "#F8D030",
-                  margin: 0,
-                  letterSpacing: 8,
-                  textShadow: "0 0 20px rgba(248,208,48,0.5)",
-                }}
-              >
-                {roomCode}
-              </p>
-              <button
-                onClick={() => {
-                  navigator.clipboard.writeText(roomCode);
-                  setCopied(true);
-                  setTimeout(() => setCopied(false), 1500);
-                }}
-                style={{
-                  fontFamily: "'Press Start 2P', monospace",
-                  fontSize: 12,
-                  padding: "6px 16px",
-                  background: copied ? "#F8D030" : "#222",
-                  color: copied ? "#222" : "#F8D030",
-                  border: "2px solid #F8D030",
-                  borderRadius: 6,
-                  cursor: "pointer",
-                  outline: "none",
-                  boxShadow: "0 0 6px #F8D030",
-                  transition: "background 0.2s, color 0.2s",
-                }}
-              >
-                {copied ? "Copied!" : "Copy"}
-              </button>
-            </div>
-            <p
-              style={{
-                fontFamily: "'Press Start 2P', monospace",
-                fontSize: 7,
-                color: "#8888BB",
-              }}
-            >
-              SHARE THIS CODE WITH YOUR BUDDIES
-            </p>
 
             {/* Username */}
             <input
