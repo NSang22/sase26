@@ -1,4 +1,4 @@
-import { Suspense, useCallback } from 'react';
+import { Suspense, useCallback, useEffect } from 'react';
 import { Canvas } from '@react-three/fiber';
 import { OrbitControls } from '@react-three/drei';
 import { StudyRoom } from './StudyRoom.jsx';
@@ -6,8 +6,10 @@ import { PetPlaceholder } from './Pet.jsx';
 import { FocusRing } from './FocusRing.jsx';
 import { SessionHUD } from '../ui/SessionHUD.jsx';
 import { QuizOverlay } from '../ui/QuizOverlay.jsx';
+import { PetTextBubble } from '../ui/PetTextBubble.jsx';
 import { useGameStore } from '../../store/gameStore.js';
 import { useFocusTracker } from '../../hooks/useFocusTracker.js';
+import { useScreenCapture } from '../../hooks/useScreenCapture.js';
 import { socket } from '../../lib/socket.js';
 
 /**
@@ -15,7 +17,7 @@ import { socket } from '../../lib/socket.js';
  * Mounts webcam focus tracking and syncs focus events to server.
  */
 export function StudySession() {
-  const { room, mySocketId, focusStates, currentQuestion } = useGameStore();
+  const { room, mySocketId, focusStates, currentQuestion, petBubbles, screenAnalysis, fakeFocusWarning } = useGameStore();
 
   const handleFocusChange = useCallback(
     (focused) => {
@@ -29,6 +31,15 @@ export function StudySession() {
     onFocusChange: handleFocusChange,
     enabled: true,
   });
+
+  const { screenEnabled, screenDenied, startScreenCapture } = useScreenCapture();
+
+  // Start screen capture after calibration finishes
+  useEffect(() => {
+    if (!calibrating && room?.code && !screenEnabled && !screenDenied) {
+      startScreenCapture(room.code);
+    }
+  }, [calibrating, room?.code, screenEnabled, screenDenied, startScreenCapture]);
 
   // Determine positions for the two pets on either side of the desk
   const players = room?.players ?? [];
@@ -88,6 +99,41 @@ export function StudySession() {
       {/* 2D overlays */}
       <SessionHUD myFocused={myFocused} partnerFocused={partnerFocused} />
       {currentQuestion && <QuizOverlay question={currentQuestion} />}
+
+      {/* Screen analysis subject pill */}
+      {screenAnalysis && (
+        <div style={overlayStyles.subjectPill}>
+          {screenAnalysis.is_studying
+            ? `📚 Studying: ${screenAnalysis.subject}`
+            : `⚠️ Distracted: ${screenAnalysis.distraction || 'Off-task'}`}
+        </div>
+      )}
+
+      {/* Screen share denied notice */}
+      {screenDenied && (
+        <div style={overlayStyles.screenDenied}>
+          Screen sharing denied — AI study tracking disabled
+        </div>
+      )}
+
+      {/* Fake-focus warning banner */}
+      {fakeFocusWarning && (
+        <div style={overlayStyles.fakeFocusWarning}>
+          🚨 Fake focus detected — {fakeFocusWarning}
+        </div>
+      )}
+
+      {/* Pet text bubbles */}
+      {mySocketId && petBubbles[mySocketId] && (
+        <div style={{ position: 'absolute', bottom: '35%', left: '30%', pointerEvents: 'none' }}>
+          <PetTextBubble text={petBubbles[mySocketId]} />
+        </div>
+      )}
+      {partner && petBubbles[partner.socketId] && (
+        <div style={{ position: 'absolute', bottom: '35%', right: '30%', pointerEvents: 'none' }}>
+          <PetTextBubble text={petBubbles[partner.socketId]} />
+        </div>
+      )}
     </div>
   );
 }
@@ -108,5 +154,48 @@ const overlayStyles = {
     fontWeight: 600,
     zIndex: 100,
     letterSpacing: 1,
+  },
+  subjectPill: {
+    position: 'absolute',
+    top: 16,
+    right: 16,
+    padding: '8px 18px',
+    background: 'rgba(16,16,40,0.9)',
+    border: '1px solid #7c3aed',
+    borderRadius: 20,
+    color: '#ddd6fe',
+    fontSize: 13,
+    fontWeight: 600,
+    zIndex: 50,
+    backdropFilter: 'blur(6px)',
+  },
+  screenDenied: {
+    position: 'absolute',
+    top: 16,
+    right: 16,
+    padding: '8px 18px',
+    background: 'rgba(40,30,10,0.9)',
+    border: '1px solid #b45309',
+    borderRadius: 20,
+    color: '#fbbf24',
+    fontSize: 12,
+    fontWeight: 600,
+    zIndex: 50,
+  },
+  fakeFocusWarning: {
+    position: 'absolute',
+    top: 60,
+    left: '50%',
+    transform: 'translateX(-50%)',
+    padding: '12px 28px',
+    background: 'linear-gradient(90deg, #7f1d1d, #991b1b)',
+    border: '1px solid #ef4444',
+    borderRadius: 12,
+    color: '#fca5a5',
+    fontSize: 15,
+    fontWeight: 700,
+    zIndex: 60,
+    animation: 'pulse 1s ease-in-out infinite',
+    textAlign: 'center',
   },
 };
