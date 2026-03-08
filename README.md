@@ -54,8 +54,8 @@ Every 45 seconds, the app captures a screenshot of the user's shared screen and 
 | 3D Rendering | React Three Fiber | Animated .glb pet models in-browser |
 | Real-Time Sync | Socket.io | Low-latency focus state, quiz events, screen analysis |
 | Physical Focus | MediaPipe Face Landmarker | In-browser head pose estimation (no GPU server) |
-| Screen Analysis | Gemini 1.5 Flash Vision | Real-time screen content classification + concept extraction |
-| Quiz & Recap | Gemini 1.5 Flash | Quiz generation from PDFs + extracted concepts, session reports |
+| Screen Analysis | Gemini 2.5 Flash Vision | Real-time screen content classification + concept extraction |
+| Quiz & Recap | Gemini 2.5 Flash | Quiz generation from PDFs + extracted concepts, session reports |
 | Voice | ElevenLabs | Pet voice reactions + spoken quiz delivery |
 | Blockchain | Solana (@solana/web3.js) + Phantom | Escrow betting + on-chain study reputation |
 | Database | MongoDB Atlas | User accounts, pet progression, session history, leaderboards |
