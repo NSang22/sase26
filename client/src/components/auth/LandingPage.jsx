@@ -1,4 +1,6 @@
 import { useState, useEffect, useRef, useCallback } from "react";
+import { useGameStore } from "../../store/gameStore.js";
+import { socket } from "../../lib/socket.js";
 
 // Pixel art sprite data - each Pokemon drawn on canvas
 const POKEMON_SPRITES = {
@@ -216,6 +218,7 @@ export default function BuddyLockIn() {
   const [transitionPhase, setTransitionPhase] = useState("idle"); // idle | closing | pokeball | opening
   const [username, setUsername] = useState("");
   const [copied, setCopied] = useState(false);
+  const { setPhase, setRoom, setUser } = useGameStore();
 
   // Generate room code
   const generateCode = useCallback(() => {
@@ -383,8 +386,48 @@ export default function BuddyLockIn() {
     triggerTransition("joinRoom");
   };
 
-  const handleStartSession = () => {
-    triggerTransition("session");
+  const handleEnterWaitingRoomAsHost = () => {
+    socket.emit("create_room", { username });
+
+    const fallback = setTimeout(() => {
+      setUser({ username });
+      setRoom({
+        code: roomCode,
+        players: [{ username, isHost: true, socketId: socket.id, ready: false }],
+        mode: "casual",
+        stakeAmount: 0,
+      });
+      setPhase("waiting");
+    }, 1000);
+
+    socket.once("room_created", (roomData) => {
+      clearTimeout(fallback);
+      setUser({ username });
+      setRoom(roomData);
+      setPhase("waiting");
+    });
+  };
+
+  const handleEnterWaitingRoomAsGuest = () => {
+    socket.emit("join_room", { roomCode: joinCode, username });
+
+    const fallback = setTimeout(() => {
+      setUser({ username });
+      setRoom({
+        code: joinCode,
+        players: [{ username, isHost: false, socketId: socket.id, ready: false }],
+        mode: "casual",
+        stakeAmount: 0,
+      });
+      setPhase("waiting");
+    }, 1000);
+
+    socket.once("room_joined", (roomData) => {
+      clearTimeout(fallback);
+      setUser({ username });
+      setRoom(roomData);
+      setPhase("waiting");
+    });
   };
 
 
@@ -829,7 +872,7 @@ export default function BuddyLockIn() {
               </PixelButton>
               <PixelButton
                 id="start"
-                onClick={handleStartSession}
+                onClick={handleEnterWaitingRoomAsHost}
                 color="#68B868"
                 hoverColor="#78C878"
                 glowColor="#68B868"
@@ -929,7 +972,7 @@ export default function BuddyLockIn() {
               <PixelButton
                 id="joinGo"
                 onClick={() => {
-                  if (joinCode.length === 6) triggerTransition("makeRoom");
+                  if (joinCode.length === 6) handleEnterWaitingRoomAsGuest();
                 }}
                 color="#58A8E8"
                 hoverColor="#68B8F8"
@@ -942,49 +985,7 @@ export default function BuddyLockIn() {
           </div>
         )}
 
-        {screen === "session" && (
-          <div
-            style={{
-              display: "flex",
-              flexDirection: "column",
-              alignItems: "center",
-              justifyContent: "center",
-              gap: 16,
-              animation: "fadeInUp 0.6s ease-out",
-            }}
-          >
-            <div
-              style={{
-                fontFamily: "'Press Start 2P', monospace",
-                fontSize: 12,
-                color: "#68B868",
-                textShadow: "0 0 15px rgba(104,184,104,0.5)",
-                animation: "pulse 2s ease-in-out infinite",
-              }}
-            >
-              ENTERING STUDY ROOM...
-            </div>
-            <div
-              style={{
-                fontFamily: "'Press Start 2P', monospace",
-                fontSize: 8,
-                color: "#8888BB",
-                marginTop: 8,
-              }}
-            >
-              3D SESSION WOULD LOAD HERE
-            </div>
-            <PixelButton
-              id="backToLanding"
-              onClick={() => triggerTransition("landing")}
-              color="#444466"
-              hoverColor="#555577"
-              glowColor="#444466"
-            >
-              BACK TO LOBBY
-            </PixelButton>
-          </div>
-        )}
+
       </div>
 
       {/* CSS animations */}

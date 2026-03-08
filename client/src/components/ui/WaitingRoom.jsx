@@ -1,8 +1,63 @@
-import { useState, useRef } from 'react';
+import { useState, useRef, useEffect } from 'react';
 import axios from 'axios';
 import { useGameStore } from '../../store/gameStore.js';
 import { socket } from '../../lib/socket.js';
 import { usePhantomWallet } from '../../hooks/usePhantomWallet.js';
+
+// ── Canvas background helpers (same as LandingPage) ──────────────────────────
+
+function fillRect(ctx, x, y, w, h) {
+  ctx.fillRect(Math.round(x), Math.round(y), Math.round(w), Math.round(h));
+}
+
+function drawParticle(ctx, x, y, size, color, alpha) {
+  ctx.globalAlpha = alpha;
+  ctx.fillStyle = color;
+  fillRect(ctx, x, y, size, size);
+  ctx.globalAlpha = 1;
+}
+
+function drawStar(ctx, x, y, frame, seed) {
+  const twinkle = Math.sin(frame * 0.03 + seed * 7) * 0.5 + 0.5;
+  const size = seed > 0.7 ? 3 : seed > 0.4 ? 2 : 1;
+  ctx.globalAlpha = twinkle * 0.8 + 0.2;
+  ctx.fillStyle = seed > 0.8 ? '#F8D030' : seed > 0.5 ? '#A8D8F8' : '#FFFFFF';
+  fillRect(ctx, x, y, size, size);
+  ctx.globalAlpha = 1;
+}
+
+function drawGround(ctx, width, height, frame) {
+  const tileSize = 24;
+  const groundY = height - 100;
+
+  ctx.fillStyle = '#2D5A1E';
+  ctx.fillRect(0, groundY, width, 100);
+
+  for (let x = 0; x < width; x += tileSize) {
+    ctx.fillStyle = x % (tileSize * 2) === 0 ? '#347A24' : '#2D6A1E';
+    ctx.fillRect(x, groundY, tileSize, 4);
+
+    if (Math.sin(x * 0.5 + frame * 0.02) > 0.3) {
+      ctx.fillStyle = '#4CAF50';
+      const bladeOffset = Math.sin(frame * 0.05 + x * 0.1) * 2;
+      fillRect(ctx, x + 4 + bladeOffset, groundY - 4, 2, 6);
+      fillRect(ctx, x + 14 + bladeOffset * 0.7, groundY - 3, 2, 5);
+    }
+  }
+
+  ctx.fillStyle = '#8B7355';
+  ctx.fillRect(0, groundY + 20, width, 30);
+  ctx.fillStyle = '#9B8365';
+  for (let x = 0; x < width; x += 32) {
+    ctx.fillRect(x + 2, groundY + 22, 28, 26);
+  }
+  ctx.fillStyle = '#7B6345';
+  for (let x = 0; x < width; x += 32) {
+    ctx.fillRect(x, groundY + 20, 32, 2);
+  }
+}
+
+// ── Pixel art styles ──────────────────────────────────────────────────────────
 
 const s = {
   root: {
@@ -11,91 +66,129 @@ const s = {
     alignItems: 'center',
     justifyContent: 'center',
     height: '100vh',
-    gap: 24,
-    background: 'linear-gradient(135deg, #0a0a18 0%, #12122a 100%)',
+    gap: 20,
+    position: 'relative',
+    overflow: 'hidden',
+    backgroundColor: '#0A0A2E',
   },
-  title: { fontSize: 28, fontWeight: 800, color: '#a78bfa', letterSpacing: 1 },
+  title: {
+    fontFamily: "'Press Start 2P', monospace",
+    fontSize: 16,
+    color: '#F8D030',
+    textShadow: '0 0 15px rgba(248,208,48,0.3), 0 2px 0 #B8860B',
+    position: 'relative',
+    zIndex: 10,
+  },
   code: {
-    background: '#1e1e3a',
-    border: '1px solid #4c1d95',
-    borderRadius: 12,
-    padding: '10px 28px',
-    fontSize: 32,
+    fontFamily: "'Press Start 2P', monospace",
+    fontSize: 28,
+    color: '#F8D030',
     letterSpacing: 8,
-    fontWeight: 900,
-    color: '#ddd6fe',
-    fontFamily: 'monospace',
+    textShadow: '0 0 20px rgba(248,208,48,0.5)',
+    position: 'relative',
+    zIndex: 10,
   },
   card: {
-    background: '#16162a',
-    border: '1px solid #2a2a4a',
-    borderRadius: 16,
-    padding: '28px 36px',
+    backgroundColor: 'rgba(10,10,46,0.85)',
+    border: '2px solid rgba(248,208,48,0.2)',
+    borderRadius: 12,
+    boxShadow: '0 0 40px rgba(0,0,0,0.5)',
+    backdropFilter: 'blur(8px)',
+    padding: '24px 32px',
+    maxWidth: 600,
+    maxHeight: '90vh',
+    overflowY: 'auto',
     display: 'flex',
     flexDirection: 'column',
-    gap: 14,
+    gap: 12,
     minWidth: 400,
+    position: 'relative',
+    zIndex: 10,
   },
   playerRow: {
     display: 'flex',
     alignItems: 'center',
     justifyContent: 'space-between',
-    padding: '10px 14px',
-    background: '#0d0d1f',
-    borderRadius: 8,
+    padding: '8px 12px',
+    background: 'rgba(0,0,0,0.3)',
+    borderRadius: 6,
     gap: 12,
   },
   badge: (ready) => ({
-    padding: '3px 10px',
-    borderRadius: 20,
-    background: ready ? '#4c1d95' : '#1e1e3a',
-    color: ready ? '#ddd6fe' : '#666',
-    fontSize: 12,
-    fontWeight: 700,
+    fontFamily: "'Press Start 2P', monospace",
+    padding: '3px 8px',
+    borderRadius: 4,
+    background: ready ? '#68B868' : '#1a1a2e',
+    color: ready ? '#fff' : '#555',
+    fontSize: 7,
+    boxShadow: ready ? '0 0 8px rgba(104,184,104,0.5)' : 'none',
   }),
   btn: (disabled) => ({
+    fontFamily: "'Press Start 2P', monospace",
     padding: '12px 0',
-    background: disabled ? '#2a2a4a' : '#7c3aed',
+    background: disabled ? '#1a1a2e' : '#68B868',
     color: disabled ? '#555' : '#fff',
     border: 'none',
-    borderRadius: 8,
-    fontSize: 15,
-    fontWeight: 700,
+    borderRadius: 4,
+    fontSize: 10,
     cursor: disabled ? 'not-allowed' : 'pointer',
     letterSpacing: 1,
+    boxShadow: disabled
+      ? 'none'
+      : '0 4px 0 #3d7a3d, 0 0 12px rgba(104,184,104,0.3)',
+    textShadow: '0 2px 4px rgba(0,0,0,0.5)',
   }),
   subBtn: {
-    padding: '10px 0',
+    fontFamily: "'Press Start 2P', monospace",
+    padding: '8px 16px',
     background: 'transparent',
-    color: '#6366f1',
-    border: '1px solid #6366f1',
-    borderRadius: 8,
-    fontSize: 14,
+    color: '#F8D030',
+    border: '2px solid rgba(248,208,48,0.5)',
+    borderRadius: 4,
+    fontSize: 8,
     cursor: 'pointer',
+    letterSpacing: 1,
+    boxShadow: '0 0 8px rgba(248,208,48,0.2)',
   },
-  label: { color: '#888', fontSize: 13 },
-  tag: { color: '#a78bfa', fontSize: 13, fontWeight: 600 },
+  label: {
+    fontFamily: "'Press Start 2P', monospace",
+    color: '#8888BB',
+    fontSize: 7,
+    position: 'relative',
+    zIndex: 10,
+  },
+  tag: {
+    fontFamily: "'Press Start 2P', monospace",
+    color: '#F8D030',
+    fontSize: 8,
+    textShadow: '0 0 8px rgba(248,208,48,0.4)',
+  },
   upload: { display: 'none' },
   uploadLabel: {
+    fontFamily: "'Press Start 2P', monospace",
     padding: '10px 16px',
-    background: '#0d0d1f',
-    border: '1px dashed #4c1d95',
+    background: 'rgba(0,0,0,0.4)',
+    border: '2px dashed rgba(248,208,48,0.4)',
     borderRadius: 8,
-    color: '#888',
+    color: '#8888BB',
     cursor: 'pointer',
     textAlign: 'center',
-    fontSize: 14,
+    fontSize: 8,
   },
   stakeBox: {
     display: 'flex',
     alignItems: 'center',
     gap: 10,
     padding: '10px 14px',
-    background: '#0d0d1f',
+    background: 'rgba(0,0,0,0.4)',
     borderRadius: 8,
-    border: '1px solid #4c1d95',
+    border: '2px solid rgba(248,208,48,0.2)',
   },
-  error: { color: '#f87171', fontSize: 13 },
+  error: {
+    fontFamily: "'Press Start 2P', monospace",
+    color: '#E85050',
+    fontSize: 8,
+  },
 };
 
 export function WaitingRoom() {
@@ -106,6 +199,87 @@ export function WaitingRoom() {
   const [uploadDone, setUploadDone] = useState(false);
   const [ready, setReady] = useState(false);
   const [error, setError] = useState('');
+
+  // Canvas background
+  const canvasRef = useRef(null);
+  const frameRef = useRef(0);
+  const starsRef = useRef([]);
+  const particlesRef = useRef([]);
+
+  useEffect(() => {
+    const stars = [];
+    for (let i = 0; i < 120; i++) {
+      stars.push({ x: Math.random() * 1200, y: Math.random() * 500, seed: Math.random() });
+    }
+    starsRef.current = stars;
+
+    const particles = [];
+    for (let i = 0; i < 20; i++) {
+      particles.push({
+        x: Math.random() * 1200,
+        y: Math.random() * 600,
+        vy: -0.3 - Math.random() * 0.5,
+        size: 2 + Math.random() * 3,
+        color: ['#F8D030', '#58A8E8', '#68B868', '#F08830', '#E85050'][Math.floor(Math.random() * 5)],
+        alpha: 0.3 + Math.random() * 0.4,
+        life: Math.random() * 200,
+      });
+    }
+    particlesRef.current = particles;
+  }, []);
+
+  useEffect(() => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    const ctx = canvas.getContext('2d');
+    let animId;
+
+    const render = () => {
+      const frame = frameRef.current++;
+      const w = canvas.width;
+      const h = canvas.height;
+
+      const grad = ctx.createLinearGradient(0, 0, 0, h);
+      grad.addColorStop(0, '#0A0A2E');
+      grad.addColorStop(0.4, '#16163A');
+      grad.addColorStop(0.7, '#1A2847');
+      grad.addColorStop(1, '#1E3A20');
+      ctx.fillStyle = grad;
+      ctx.fillRect(0, 0, w, h);
+
+      starsRef.current.forEach((star) => {
+        drawStar(ctx, star.x, star.y, frame, star.seed);
+      });
+
+      // Crescent moon (top right)
+      ctx.fillStyle = '#FFFDE8';
+      ctx.beginPath();
+      ctx.arc(950, 80, 35, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.fillStyle = '#0A0A2E';
+      ctx.beginPath();
+      ctx.arc(940, 75, 30, 0, Math.PI * 2);
+      ctx.fill();
+
+      particlesRef.current.forEach((p) => {
+        p.y += p.vy;
+        p.x += Math.sin(frame * 0.02 + p.life) * 0.3;
+        p.life++;
+        if (p.y < -10) {
+          p.y = h + 10;
+          p.x = Math.random() * w;
+        }
+        drawParticle(ctx, p.x, p.y, p.size, p.color, p.alpha * (Math.sin(p.life * 0.03) * 0.3 + 0.7));
+      });
+
+      drawGround(ctx, w, h, frame);
+
+      animId = requestAnimationFrame(render);
+    };
+
+    render();
+    return () => cancelAnimationFrame(animId);
+  }, []);
 
   if (!room) return null;
 
@@ -149,6 +323,26 @@ export function WaitingRoom() {
 
   return (
     <div style={s.root}>
+      <link
+        href="https://fonts.googleapis.com/css2?family=Press+Start+2P&display=swap"
+        rel="stylesheet"
+      />
+
+      <canvas
+        ref={canvasRef}
+        width={1100}
+        height={650}
+        style={{
+          position: 'absolute',
+          top: 0,
+          left: 0,
+          width: '100%',
+          height: '100%',
+          imageRendering: 'pixelated',
+          zIndex: 0,
+        }}
+      />
+
       <div style={s.title}>Waiting Room</div>
 
       <div style={s.code}>{room.code}</div>
@@ -169,7 +363,7 @@ export function WaitingRoom() {
         ))}
         {room.players.length < 2 && (
           <div style={s.playerRow}>
-            <span style={{ color: '#555' }}>Waiting for partner...</span>
+            <span style={{ color: '#444466', fontFamily: "'Press Start 2P', monospace", fontSize: 8 }}>Waiting for partner...</span>
           </div>
         )}
 
