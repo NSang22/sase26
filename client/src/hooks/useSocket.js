@@ -56,10 +56,13 @@ export function useSocket() {
       setRoom(room);
     });
 
-    socket.on('session_start', ({ startTime, narratorAudioUrl }) => {
-      useGameStore.getState().setSessionStartTime(startTime);
+    socket.on('session_start', ({ startTime, narratorAudioUrl, roomState }) => {
+      const store = useGameStore.getState();
+      // Atomically sync the latest room state (with buddySelections) before
+      // switching phase so StudySession always renders the right Pokemon.
+      if (roomState) store.setRoom(roomState);
+      store.setSessionStartTime(startTime);
       setPhase('session');
-      // Play narrator "Trainers, lock in!" countdown
       if (narratorAudioUrl) playAudio(narratorAudioUrl, { priority: true });
     });
 

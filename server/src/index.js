@@ -238,7 +238,12 @@ function startSession(room) {
   room.startSession();
   // Include narrator session-start audio URL
   const narratorAudioUrl = voiceService.getNarratorUrl('session-start');
-  io.to(room.code).emit('session_start', { startTime: room.startTime, narratorAudioUrl });
+  // Include full room state so clients have fresh buddySelections on session mount
+  io.to(room.code).emit('session_start', {
+    startTime: room.startTime,
+    narratorAudioUrl,
+    roomState: room.getState(),
+  });
   scheduleNextQuiz(room);
   console.log(`[room:${room.code}] Session started with ${room.players.size} players`);
 }
@@ -486,6 +491,7 @@ io.on('connection', (socket) => {
     if (!room) return;
     room.selectBuddy(socket.id, buddy);
     io.to(roomCode).emit('buddy_update', room.buddySelections);
+    broadcastRoomState(room); // keeps store.room.buddySelections in sync
   });
 
   // ── update_settings (host only) ──────────────────────────────────────────
