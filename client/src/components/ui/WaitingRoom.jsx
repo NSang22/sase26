@@ -202,6 +202,8 @@ export function WaitingRoom() {
   const [duration, setDuration] = useState(25);
   const [quizMode, setQuizMode] = useState('frequency');
   const [quizValue, setQuizValue] = useState(5);
+  const [mode, setMode] = useState('casual');
+  const [stakeAmount, setStakeAmount] = useState(0.1);
 
   // Canvas background
   const canvasRef = useRef(null);
@@ -339,13 +341,21 @@ export function WaitingRoom() {
     return () => socket.off('session_started');
   }, []);
 
+  useEffect(() => {
+    socket.on('mode_updated', (data) => {
+      setMode(data.mode);
+      setStakeAmount(data.stakeAmount / 1e9);
+    });
+    return () => socket.off('mode_updated');
+  }, []);
+
   if (!room) return null;
 
   const isHost = room.players.find((p) => p.socketId === socket.id)?.isHost;
-  const isLockedIn = room.mode === 'locked-in';
+  const isLockedIn = mode === 'locked-in';
   const needsWallet = isLockedIn && !walletAddress;
   const myPlayer = room.players.find((p) => p.socketId === socket.id);
-  const stakeSOL = isLockedIn ? (room.stakeAmount / 1e9).toFixed(2) : null;
+  const stakeSOL = isLockedIn ? stakeAmount.toFixed(2) : null;
 
   async function handleUpload(e) {
     const file = e.target.files?.[0];
@@ -605,6 +615,102 @@ export function WaitingRoom() {
                 Quizzes:{' '}
                 <span style={{ color: '#CCC' }}>
                   {quizMode === 'frequency' ? `Every ${quizValue} min` : `${quizValue} total`}
+                </span>
+              </span>
+            </div>
+          </div>
+        )}
+
+        {/* Session mode */}
+        {isHost ? (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+            <div style={{ ...s.label, color: '#F8D030' }}>SESSION MODE</div>
+            <div style={{ display: 'flex', gap: 6 }}>
+              {[
+                { value: 'casual',    label: 'CASUAL',     color: '#68B868' },
+                { value: 'locked-in', label: '⬡ LOCKED IN', color: '#E85050' },
+              ].map(({ value, label, color }) => {
+                const active = mode === value;
+                return (
+                  <button
+                    key={value}
+                    onClick={() => {
+                      setMode(value);
+                      socket.emit('update_mode', {
+                        roomCode: room.code,
+                        mode: value,
+                        stakeAmount: stakeAmount * 1e9,
+                      });
+                    }}
+                    style={{
+                      fontFamily: "'Press Start 2P', monospace",
+                      fontSize: 7,
+                      padding: '6px 12px',
+                      borderRadius: 4,
+                      border: active ? `2px solid ${color}` : '2px solid rgba(255,255,255,0.1)',
+                      background: active ? color : 'rgba(0,0,0,0.3)',
+                      color: active ? '#fff' : '#8888AA',
+                      cursor: 'pointer',
+                      boxShadow: active ? `0 0 10px ${color}66` : 'none',
+                      transition: 'all 0.15s',
+                    }}
+                  >
+                    {label}
+                  </button>
+                );
+              })}
+            </div>
+
+            {isLockedIn && (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                <div style={s.label}>STAKE AMOUNT</div>
+                <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+                  {[0.05, 0.1, 0.25, 0.5].map((amt) => {
+                    const active = stakeAmount === amt;
+                    return (
+                      <button
+                        key={amt}
+                        onClick={() => {
+                          setStakeAmount(amt);
+                          socket.emit('update_mode', {
+                            roomCode: room.code,
+                            mode,
+                            stakeAmount: amt * 1e9,
+                          });
+                        }}
+                        style={{
+                          fontFamily: "'Press Start 2P', monospace",
+                          fontSize: 7,
+                          padding: '6px 12px',
+                          borderRadius: 4,
+                          border: active ? '2px solid #E85050' : '2px solid rgba(255,255,255,0.1)',
+                          background: active ? '#E85050' : 'rgba(0,0,0,0.3)',
+                          color: active ? '#fff' : '#8888AA',
+                          cursor: 'pointer',
+                          boxShadow: active ? '0 0 8px rgba(232,80,80,0.4)' : 'none',
+                          transition: 'all 0.15s',
+                        }}
+                      >
+                        {amt} SOL
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
+          </div>
+        ) : (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+            <div style={{ ...s.label, color: '#F8D030' }}>SESSION MODE</div>
+            <div style={{
+              backgroundColor: 'rgba(0,0,0,0.3)',
+              borderRadius: 6,
+              padding: '8px 12px',
+            }}>
+              <span style={{ fontFamily: "'Press Start 2P', monospace", fontSize: 7, color: '#8888BB' }}>
+                Mode:{' '}
+                <span style={{ color: isLockedIn ? '#E85050' : '#68B868' }}>
+                  {isLockedIn ? `Locked In (${stakeAmount.toFixed(2)} SOL)` : 'Casual'}
                 </span>
               </span>
             </div>
