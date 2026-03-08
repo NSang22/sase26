@@ -6,17 +6,17 @@ Buddy is a gamified, multiplayer co-working platform where up to 4 users join a 
 
 ---
 
-## 🎥 Demo
+## Demo
 
 *Coming soon*
 
 ---
 
-## 🧠 The Problem
+## The Problem
 
 Study tools track what you consume, but nothing holds you accountable for actually engaging with material. You can stare at a textbook for an hour and retain nothing. Existing focus apps rely on honor systems or simple timers — they don't know if you're actually learning.
 
-## 💡 The Solution
+## The Solution
 
 Buddy creates real consequences for distraction through three layers of accountability:
 
@@ -26,7 +26,7 @@ Buddy creates real consequences for distraction through three layers of accounta
 
 ---
 
-## 🏗 Architecture
+## Architecture
 
 ### Dual-Layer Focus Detection
 
@@ -65,7 +65,7 @@ Every 45 seconds, the app captures a screenshot of the user's shared screen and 
 
 ---
 
-## 🎮 Core Features
+## Core Features
 
 ### 3D Pet Companions
 Custom-modeled low-poly pets built in Blender with three animation states: **Working**, **Idle**, and **Distracted/Sleeping**. Each pet species has a distinct ElevenLabs voice personality — the owl is dry and wise, the cat is sarcastic, the dog is enthusiastic. Voice lines fire on state changes: a disappointed sigh when your teammate loses focus, a cheer when you nail a quiz.
@@ -100,7 +100,7 @@ All session data persists in MongoDB — your pet levels up, your stats update, 
 
 ---
 
-## 🔒 Privacy
+## Privacy
 
 - **No webcam video is transmitted.** MediaPipe runs entirely in-browser. Only a boolean (`focused: true/false`) is sent over the network.
 - **Screen capture is opt-in.** Users grant screen sharing permission via the browser's native `getDisplayMedia()` API. If denied, the system falls back to MediaPipe-only tracking.
@@ -108,7 +108,7 @@ All session data persists in MongoDB — your pet levels up, your stats update, 
 
 ---
 
-## 🚀 Getting Started
+## Getting Started
 
 ### Prerequisites
 - Node.js 18+
@@ -155,7 +155,7 @@ cd client && npm run dev
 
 ---
 
-## 🧩 How AI Is Used
+## How AI Is Used
 
 Buddy uses AI at three distinct layers:
 
@@ -167,7 +167,7 @@ Buddy uses AI at three distinct layers:
 
 ---
 
-## 👥 Team
+## Team
 
 | Member | Role |
 |---|---|
