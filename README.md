@@ -1,4 +1,4 @@
-# 🐾 Buddy: Lock In
+# Buddy: Lock In
 
 > **If you lose focus, your pet falls asleep — and your money's on the line.**
 
@@ -171,13 +171,13 @@ Buddy uses AI at three distinct layers:
 
 | Member | Role |
 |---|---|
-| **[Nikhil]** | Backend, Blockchain, Screen Agent |
-| **[Abhay]** | Frontend, 3D Integration, UX |
-| **[Kushagra]** | 3D Modeling, Animation (Blender) |
+| **Nikhil** | Backend, Blockchain, Screen Agent |
+| **Abhay** | Frontend, 3D Integration, UX |
+| **Kushagra** | 3D Modeling, Animation (Blender) |
 
 ---
 
-## 📄 License
+## License
 
 MIT
 
