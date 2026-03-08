@@ -27,6 +27,7 @@ export function useSocket() {
     setNarratorManifest,
     setScreenAnalysis,
     setFakeFocusWarning,
+    patchSummary,
   } = useGameStore();
 
   const emit = useCallback((event, data) => {
@@ -123,9 +124,14 @@ export function useSocket() {
         const url = urls[Math.floor(Math.random() * urls.length)];
         if (url) playAudio(url);
       }
-      // Play recap narration if available
-      if (summary.recapAudioUrl) {
-        setTimeout(() => playAudio(summary.recapAudioUrl), 2000);
+      // recapAudioUrl arrives later via session_recap_update
+    });
+
+    // Background AI results arrive after session_end — patch them into the summary
+    socket.on('session_recap_update', (patch) => {
+      patchSummary(patch);
+      if (patch.recapAudioUrl) {
+        setTimeout(() => playAudio(patch.recapAudioUrl), 2000);
       }
     });
 
@@ -161,13 +167,14 @@ export function useSocket() {
       socket.off('surprise-quiz');
       socket.off('quiz-results');
       socket.off('session_end');
+      socket.off('session_recap_update');
       socket.off('screen-analysis');
       socket.off('fake-focus');
       socket.off('player_left');
       socket.off('error');
       socket.off('escrow_ready');
     };
-  }, [setMySocketId, setRoom, setPhase, updateFocusState, setFocusStates, setScores, setCurrentQuestion, setSummary]);
+  }, [setMySocketId, setRoom, setPhase, updateFocusState, setFocusStates, setScores, setCurrentQuestion, setSummary, patchSummary]);
 
   return { emit, socket };
 }

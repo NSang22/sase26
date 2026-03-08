@@ -297,148 +297,148 @@ function closeQuestion(room, questionId) {
 async function endSession(room) {
   room.endSession();
   const summary = room.getSummary();
+  const roomCode = room.code;
 
-  // ── Per-player XP awards, stat updates, and leaderboard upserts ────────────
-  const { Session } = await import('./db/models/Session.js');
-  const { User } = await import('./db/models/User.js');
-  const { Leaderboard } = await import('./db/models/Leaderboard.js');
+  // Snapshot room data synchronously before removal (refs go stale after removeRoom)
+  const allConcepts = [];
+  for (const p of room.players.values()) {
+    for (const c of p.screenConcepts) {
+      if (!allConcepts.includes(c)) allConcepts.push(c);
+    }
+  }
+  const allTimeline = [];
+  for (const p of room.players.values()) {
+    for (const entry of p.screenTimeline) {
+      allTimeline.push({ ...entry, username: p.username });
+    }
+  }
+  allTimeline.sort((a, b) => a.timestamp - b.timestamp);
 
-  const playerResults = [];
+  const recapText = summary.players
+    .map((p) => `${p.username}: ${(p.focusPercent * 100).toFixed(0)}% focus, ${(p.quizAccuracy * 100).toFixed(0)}% quiz accuracy.`)
+    .join(' ') + (summary.winner ? ` The winner is ${summary.winner.username}!` : ' It\'s a tie!');
 
-  for (const p of summary.players) {
-    // XP = focus_percentage * 100 + quiz_correct * 10
-    const xpGained = Math.round(p.focusPercent * 100) + p.quizCorrectCount * 10;
-    let newLevel = null;
+  const roomMode       = room.mode;
+  const roomStartTime  = room.startTime;
+  const roomEndTime    = room.endTime;
+  const roomStakeAmount = room.stakeAmount;
+  const allTimelines   = room.getAllTimelines();
+
+  // ── Emit immediately — recap screen appears with zero delay ─────────────────
+  io.to(roomCode).emit('session_end', summary);
+  roomManager.removeRoom(roomCode);
+  console.log(`[room:${roomCode}] Session ended`);
+
+  // ── Background group 1: DB writes (XP, leaderboard, session record) ─────────
+  (async () => {
+    const { Session }    = await import('./db/models/Session.js');
+    const { User }       = await import('./db/models/User.js');
+    const { Leaderboard } = await import('./db/models/Leaderboard.js');
+
+    // Parallelize per-player XP + leaderboard updates
+    const playerResults = await Promise.all(summary.players.map(async (p) => {
+      const xpGained = Math.round(p.focusPercent * 100) + p.quizCorrectCount * 10;
+      let newLevel = null;
+      try {
+        const user = await User.findById(p.userId);
+        if (user) {
+          const leveled = user.addXP(xpGained);
+          if (leveled) newLevel = user.petLevel;
+          user.totalFocusMinutes += summary.duration / 60000;
+          user.totalSessions += 1;
+          if (summary.winner?.userId === p.userId) user.wins += 1;
+          const today     = new Date().toDateString();
+          const yesterday = new Date(Date.now() - 86_400_000).toDateString();
+          const lastDate  = user.lastSessionDate
+            ? new Date(user.lastSessionDate).toDateString()
+            : null;
+          if (lastDate === yesterday) user.currentStreak += 1;
+          else if (lastDate !== today) user.currentStreak = 1;
+          user.longestStreak   = Math.max(user.longestStreak, user.currentStreak);
+          user.lastSessionDate = new Date();
+          await user.save();
+          await Leaderboard.upsertFromSession(p.userId, p.username, {
+            focusPercent: p.focusPercent,
+            quizAccuracy: p.quizAccuracy,
+            won:          summary.winner?.userId === p.userId,
+            durationMs:   summary.duration,
+            petSpecies:   user.petSpecies,
+            petLevel:     user.petLevel,
+          });
+        }
+      } catch (err) {
+        console.error(`[endSession] XP update failed for ${p.userId}:`, err.message);
+      }
+      return {
+        userId: p.userId, username: p.username,
+        focusPercent: p.focusPercent, quizAccuracy: p.quizAccuracy,
+        quizCorrectCount: p.quizCorrectCount, totalQuizPoints: p.totalQuizPoints,
+        sessionScore: p.sessionScore, xpGained, newLevel,
+      };
+    }));
 
     try {
-      const user = await User.findById(p.userId);
-      if (user) {
-        const leveled = user.addXP(xpGained);
-        if (leveled) newLevel = user.petLevel;
-
-        user.totalFocusMinutes += summary.duration / 60000;
-        user.totalSessions += 1;
-        if (summary.winner?.userId === p.userId) user.wins += 1;
-
-        // Daily study streak: increment if last session was yesterday, reset otherwise
-        const today = new Date().toDateString();
-        const yesterday = new Date(Date.now() - 86_400_000).toDateString();
-        const lastDate = user.lastSessionDate
-          ? new Date(user.lastSessionDate).toDateString()
-          : null;
-        if (lastDate === today) {
-          // already played today — no streak change
-        } else if (lastDate === yesterday) {
-          user.currentStreak += 1;
-        } else {
-          user.currentStreak = 1;
-        }
-        user.longestStreak = Math.max(user.longestStreak, user.currentStreak);
-        user.lastSessionDate = new Date();
-        await user.save();
-
-        await Leaderboard.upsertFromSession(p.userId, p.username, {
-          focusPercent: p.focusPercent,
-          quizAccuracy: p.quizAccuracy,
-          won: summary.winner?.userId === p.userId,
-          durationMs: summary.duration,
-          petSpecies: user.petSpecies,
-          petLevel: user.petLevel,
-        });
-      }
+      await Session.create({
+        roomCode, mode: roomMode,
+        participants:   summary.players.map((p) => p.userId),
+        players:        playerResults,
+        startTime:      new Date(roomStartTime),
+        endTime:        new Date(roomEndTime),
+        winner:         summary.winner?.userId ?? null,
+        stakeAmount:    roomStakeAmount,
+        screenTimelines: allTimelines,
+      });
     } catch (err) {
-      console.error(`[endSession] XP update failed for ${p.userId}:`, err.message);
+      console.error('[endSession] Session save failed:', err.message);
+    }
+  })().catch((err) => console.error('[endSession] DB error:', err.message));
+
+  // ── Background group 2: Solana payout (devnet confirm can take ~20 s) ───────
+  (async () => {
+    const payoutTx = await escrowService.handleSessionPayout(summary);
+    if (payoutTx) {
+      io.to(roomCode).emit('session_recap_update', { payoutTxSignature: payoutTx });
+    }
+  })().catch((err) => console.error('[escrow] Payout error:', err.message));
+
+  // ── Background group 3: AI + audio (all three in parallel) ─────────────────
+  (async () => {
+    const [conceptResult, reportResult, audioResult] = await Promise.allSettled([
+      allConcepts.length > 0
+        ? screenAgent.generateConceptQuiz(allConcepts)
+        : Promise.resolve(null),
+      allTimeline.length > 0
+        ? screenAgent.generateStudyReport(allTimeline)
+        : Promise.resolve(null),
+      voiceService.generateRecapAudio(recapText, roomCode),
+    ]);
+
+    const update = {};
+
+    if (conceptResult.status === 'fulfilled' && conceptResult.value) {
+      update.conceptQuiz = conceptResult.value;
+      console.log(`[screen] Generated ${update.conceptQuiz.length} concept quiz questions from ${allConcepts.length} concepts`);
+    } else if (conceptResult.status === 'rejected') {
+      console.error('[screen] Concept quiz generation failed:', conceptResult.reason?.message);
     }
 
-    playerResults.push({
-      userId: p.userId,
-      username: p.username,
-      focusPercent: p.focusPercent,
-      quizAccuracy: p.quizAccuracy,
-      quizCorrectCount: p.quizCorrectCount,
-      totalQuizPoints: p.totalQuizPoints,
-      sessionScore: p.sessionScore,
-      xpGained,
-      newLevel,
-    });
-
-    // Attach xpGained + newLevel to the summary so the recap screen can show it
-    p.xpGained = xpGained;
-    p.newLevel = newLevel;
-  }
-
-  // ── Persist session ─────────────────────────────────────────────────────────
-  try {
-    await Session.create({
-      roomCode: room.code,
-      mode: room.mode,
-      participants: summary.players.map((p) => p.userId),
-      players: playerResults,
-      startTime: new Date(room.startTime),
-      endTime: new Date(room.endTime),
-      winner: summary.winner?.userId ?? null,
-      stakeAmount: room.stakeAmount,
-      studyReport: summary.studyReport ?? null,
-      screenTimelines: room.getAllTimelines(),
-    });
-  } catch (err) {
-    console.error('[endSession] Session save failed:', err.message);
-  }
-
-  // ── Solana payout ───────────────────────────────────────────────────────────
-  const payoutTx = await escrowService.handleSessionPayout(summary);
-  if (payoutTx) summary.payoutTxSignature = payoutTx;
-
-  // ── Screen-based concept quiz (from screen captures, not PDF) ─────────────
-  try {
-    // Gather all unique concepts across all players
-    const allConcepts = [];
-    for (const p of room.players.values()) {
-      for (const c of p.screenConcepts) {
-        if (!allConcepts.includes(c)) allConcepts.push(c);
-      }
-    }
-    if (allConcepts.length > 0) {
-      const conceptQuiz = await screenAgent.generateConceptQuiz(allConcepts);
-      summary.conceptQuiz = conceptQuiz;
-      console.log(`[screen] Generated ${conceptQuiz.length} concept quiz questions from ${allConcepts.length} concepts`);
-    }
-  } catch (err) {
-    console.error('[screen] Concept quiz generation failed:', err.message);
-  }
-
-  // ── Study report from screen timelines ────────────────────────────────────
-  try {
-    const allTimeline = [];
-    for (const p of room.players.values()) {
-      for (const entry of p.screenTimeline) {
-        allTimeline.push({ ...entry, username: p.username });
-      }
-    }
-    allTimeline.sort((a, b) => a.timestamp - b.timestamp);
-    if (allTimeline.length > 0) {
-      const studyReport = await screenAgent.generateStudyReport(allTimeline);
-      summary.studyReport = studyReport;
+    if (reportResult.status === 'fulfilled' && reportResult.value) {
+      update.studyReport = reportResult.value;
       console.log('[screen] Study report generated');
+    } else if (reportResult.status === 'rejected') {
+      console.error('[screen] Study report generation failed:', reportResult.reason?.message);
     }
-  } catch (err) {
-    console.error('[screen] Study report generation failed:', err.message);
-  }
 
-  // ── Generate recap narration (ElevenLabs) ─────────────────────────────────
-  try {
-    const recapText = summary.players
-      .map((p) => `${p.username}: ${(p.focusPercent * 100).toFixed(0)}% focus, ${(p.quizAccuracy * 100).toFixed(0)}% quiz accuracy.`)
-      .join(' ') + (summary.winner ? ` The winner is ${summary.winner.username}!` : ' It\'s a tie!');
-    const recapUrl = await voiceService.generateRecapAudio(recapText, room.code);
-    if (recapUrl) summary.recapAudioUrl = recapUrl;
-  } catch (err) {
-    console.error('[voice] Recap audio generation failed:', err.message);
-  }
+    if (audioResult.status === 'fulfilled' && audioResult.value) {
+      update.recapAudioUrl = audioResult.value;
+    } else if (audioResult.status === 'rejected') {
+      console.error('[voice] Recap audio generation failed:', audioResult.reason?.message);
+    }
 
-  io.to(room.code).emit('session_end', summary);
-  roomManager.removeRoom(room.code);
-  console.log(`[room:${room.code}] Session ended`);
+    if (Object.keys(update).length > 0) {
+      io.to(roomCode).emit('session_recap_update', update);
+    }
+  })().catch((err) => console.error('[endSession] AI/audio error:', err.message));
 }
 
 // ── Socket.io ────────────────────────────────────────────────────────────────
