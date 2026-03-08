@@ -1,0 +1,125 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>Phone Detection ONLY Test</title>
+  <style>
+    body { background: #111; color: #eee; font-family: monospace; padding: 20px; }
+    video { width: 480px; border: 2px solid #444; display: block; margin: 10px 0; }
+    #out { white-space: pre-wrap; background: #222; padding: 12px; max-height: 400px; overflow-y: auto; font-size: 13px; }
+    .phone { color: #f87171; font-weight: bold; }
+    .other { color: #facc15; }
+    .none { color: #666; }
+    canvas { border: 2px solid #7c3aed; margin: 10px 0; }
+  </style>
+</head>
+<body>
+  <h2>Phone Detection — Isolated Test</h2>
+  <p>This ONLY runs ObjectDetector (no face tracking). Hold your phone in front of the camera.</p>
+  <button id="btn">Start</button>
+  <video id="vid" playsinline muted></video>
+  <canvas id="canvas" width="640" height="480"></canvas>
+  <div id="out"></div>
+
+  <script type="module">
+    import { ObjectDetector, FilesetResolver } from 'https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.32';
+
+    const vid = document.getElementById('vid');
+    const canvas = document.getElementById('canvas');
+    const ctx = canvas.getContext('2d');
+    const out = document.getElementById('out');
+    let detector = null;
+    let lastTs = -1;
+
+    function log(msg, cls) {
+      const d = document.createElement('div');
+      d.className = cls || '';
+      d.textContent = `[${new Date().toLocaleTimeString()}] ${msg}`;
+      out.prepend(d);
+      if (out.children.length > 200) out.lastChild.remove();
+    }
+
+    document.getElementById('btn').addEventListener('click', async () => {
+      document.getElementById('btn').disabled = true;
+      log('Loading ObjectDetector...');
+
+      try {
+        const resolver = await FilesetResolver.forVisionTasks(
+          'https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.32/wasm'
+        );
+        log('WASM loaded ✓');
+
+        detector = await ObjectDetector.createFromOptions(resolver, {
+          baseOptions: {
+            modelAssetPath: 'https://storage.googleapis.com/mediapipe-models/object_detector/efficientdet_lite0/int8/1/efficientdet_lite0.tflite',
+            delegate: 'GPU',
+          },
+          runningMode: 'VIDEO',
+          maxResults: 10,
+          scoreThreshold: 0.2,
+        });
+        log('ObjectDetector created ✓');
+      } catch (e) {
+        log('ERROR creating detector: ' + e.message, 'phone');
+        return;
+      }
+
+      try {
+        const stream = await navigator.mediaDevices.getUserMedia({ video: { width: 640, height: 480 } });
+        vid.srcObject = stream;
+        await vid.play();
+        log('Webcam started ✓ — running detection loop...');
+      } catch (e) {
+        log('ERROR getting webcam: ' + e.message, 'phone');
+        return;
+      }
+
+      function detect() {
+        if (!detector || vid.paused) return;
+
+        const now = performance.now();
+        // MediaPipe requires strictly increasing timestamps
+        if (now <= lastTs) {
+          requestAnimationFrame(detect);
+          return;
+        }
+        lastTs = now;
+
+        let results;
+        try {
+          results = detector.detectForVideo(vid, now);
+        } catch (e) {
+          log('detectForVideo error: ' + e.message, 'phone');
+          requestAnimationFrame(detect);
+          return;
+        }
+
+        // Draw video frame + bounding boxes on canvas
+        ctx.drawImage(vid, 0, 0, canvas.width, canvas.height);
+
+        if (results.detections.length > 0) {
+          for (const det of results.detections) {
+            const bb = det.boundingBox;
+            const label = det.categories.map(c => `${c.categoryName} ${(c.score*100).toFixed(0)}%`).join(', ');
+            const isPhone = det.categories.some(c => c.categoryName === 'cell phone');
+
+            ctx.strokeStyle = isPhone ? '#ff4444' : '#ffcc00';
+            ctx.lineWidth = 3;
+            ctx.strokeRect(bb.originX, bb.originY, bb.width, bb.height);
+
+            ctx.fillStyle = isPhone ? '#ff4444' : '#ffcc00';
+            ctx.font = 'bold 14px monospace';
+            ctx.fillText(label, bb.originX, bb.originY - 6);
+
+            log(`  ${label}  [${bb.originX.toFixed(0)},${bb.originY.toFixed(0)} ${bb.width.toFixed(0)}x${bb.height.toFixed(0)}]`, isPhone ? 'phone' : 'other');
+          }
+        }
+
+        requestAnimationFrame(detect);
+      }
+
+      requestAnimationFrame(detect);
+    });
+  </script>
+</body>
+</html>

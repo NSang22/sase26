@@ -1,0 +1,283 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>MediaPipe Focus Tracker Test</title>
+  <style>
+    * { margin: 0; box-sizing: border-box; }
+    body { background: #0a0a18; color: #e8e8f0; font-family: monospace; display: flex; flex-direction: column; align-items: center; padding: 24px; gap: 16px; }
+    h1 { color: #a78bfa; font-size: 20px; }
+    video { width: 480px; border-radius: 12px; border: 2px solid #2a2a4a; transform: scaleX(-1); }
+    #status { font-size: 48px; font-weight: 900; }
+    .focused { color: #4ade80; }
+    .unfocused { color: #f87171; }
+    .calibrating { color: #facc15; }
+    #phone-badge { font-size: 20px; font-weight: 700; padding: 6px 20px; border-radius: 8px; }
+    .phone-yes { background: #dc2626; color: #fff; }
+    .phone-no { background: #14532d; color: #4ade80; }
+    #info { display: flex; gap: 32px; font-size: 16px; flex-wrap: wrap; justify-content: center; }
+    #info span { color: #a78bfa; font-weight: 700; }
+    #log { width: 480px; max-height: 200px; overflow-y: auto; background: #12122a; border-radius: 8px; padding: 12px; font-size: 12px; line-height: 1.6; border: 1px solid #2a2a4a; }
+    .log-focus { color: #4ade80; }
+    .log-unfocus { color: #f87171; }
+    .log-phone { color: #f59e0b; }
+    #controls { display: flex; gap: 12px; }
+    button { padding: 10px 24px; border-radius: 8px; border: none; background: #7c3aed; color: #fff; font-weight: 700; cursor: pointer; font-size: 14px; }
+    button:disabled { opacity: 0.4; cursor: default; }
+    #thresholds { display: flex; gap: 20px; align-items: center; font-size: 14px; flex-wrap: wrap; justify-content: center; }
+    #thresholds label { color: #888; }
+    #thresholds input { width: 60px; background: #12122a; border: 1px solid #4c1d95; color: #e8e8f0; padding: 4px 8px; border-radius: 4px; text-align: center; }
+  </style>
+</head>
+<body>
+  <h1>MediaPipe Focus + Phone Detection — Test Page</h1>
+
+  <video id="video" playsinline muted></video>
+
+  <div id="status" class="calibrating">Waiting...</div>
+  <div id="phone-badge" class="phone-no">📱 No phone</div>
+
+  <div id="info">
+    <div>Pitch: <span id="pitch">—</span>°</div>
+    <div>Yaw: <span id="yaw">—</span>°</div>
+    <div>Δ Pitch: <span id="dpitch">—</span>°</div>
+    <div>Δ Yaw: <span id="dyaw">—</span>°</div>
+    <div>Phone conf: <span id="phoneConf">—</span></div>
+  </div>
+
+  <div id="thresholds">
+    <label>Yaw threshold: <input id="yawThresh" type="number" value="25" min="5" max="90" /></label>
+    <label>Pitch threshold: <input id="pitchThresh" type="number" value="25" min="5" max="90" /></label>
+    <label>Phone confidence: <input id="phoneThresh" type="number" value="0.30" min="0.1" max="1" step="0.05" /></label>
+  </div>
+
+  <div id="controls">
+    <button id="startBtn">Start</button>
+    <button id="recalBtn" disabled>Recalibrate</button>
+  </div>
+
+  <div id="log"></div>
+
+  <script type="module">
+    import { FaceLandmarker, ObjectDetector, FilesetResolver } from 'https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@latest';
+
+    const video = document.getElementById('video');
+    const statusEl = document.getElementById('status');
+    const phoneBadge = document.getElementById('phone-badge');
+    const pitchEl = document.getElementById('pitch');
+    const yawEl = document.getElementById('yaw');
+    const dpitchEl = document.getElementById('dpitch');
+    const dyawEl = document.getElementById('dyaw');
+    const phoneConfEl = document.getElementById('phoneConf');
+    const logEl = document.getElementById('log');
+    const startBtn = document.getElementById('startBtn');
+    const yawThreshInput = document.getElementById('yawThresh');
+    const pitchThreshInput = document.getElementById('pitchThresh');
+    const phoneThreshInput = document.getElementById('phoneThresh');
+
+    let landmarker = null;
+    let detector = null;
+    let calibration = null;
+    let calibrationFrames = [];
+    let isCalibrating = false;
+    let gazeOk = true;
+    let phoneDetected = false;
+    let currentFocused = true;
+    let animFrame = null;
+    let frameCount = 0;
+    const PHONE_DETECT_INTERVAL = 6;
+
+    function log(msg, cls) {
+      const line = document.createElement('div');
+      line.className = cls || '';
+      line.textContent = `[${new Date().toLocaleTimeString()}] ${msg}`;
+      logEl.prepend(line);
+      if (logEl.children.length > 100) logEl.lastChild.remove();
+    }
+
+    function updateCombinedFocus() {
+      const focused = gazeOk && !phoneDetected;
+      if (focused !== currentFocused) {
+        currentFocused = focused;
+        if (focused) {
+          statusEl.textContent = 'FOCUSED';
+          statusEl.className = 'focused';
+          log('→ Focus REGAINED', 'log-focus');
+        } else if (phoneDetected && !gazeOk) {
+          statusEl.textContent = 'NOT FOCUSED + PHONE';
+          statusEl.className = 'unfocused';
+        } else if (phoneDetected) {
+          statusEl.textContent = 'PHONE DETECTED';
+          statusEl.className = 'unfocused';
+          // phone log happens separately
+        } else {
+          statusEl.textContent = 'NOT FOCUSED';
+          statusEl.className = 'unfocused';
+          log('→ Focus LOST (gaze)', 'log-unfocus');
+        }
+      }
+    }
+
+    async function init() {
+      startBtn.disabled = true;
+      statusEl.textContent = 'Loading models...';
+      statusEl.className = 'calibrating';
+      log('Loading MediaPipe Face Landmarker + Object Detector...');
+
+      const resolver = await FilesetResolver.forVisionTasks(
+        'https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@latest/wasm'
+      );
+
+      landmarker = await FaceLandmarker.createFromOptions(resolver, {
+        baseOptions: {
+          modelAssetPath: 'https://storage.googleapis.com/mediapipe-models/face_landmarker/face_landmarker/float16/1/face_landmarker.task',
+          delegate: 'GPU',
+        },
+        runningMode: 'VIDEO',
+        numFaces: 1,
+        outputFaceBlendshapes: false,
+        outputFacialTransformationMatrixes: true,
+      });
+      log('Face Landmarker loaded ✓');
+
+      detector = await ObjectDetector.createFromOptions(resolver, {
+        baseOptions: {
+          modelAssetPath: 'https://storage.googleapis.com/mediapipe-models/object_detector/efficientdet_lite0/int8/1/efficientdet_lite0.tflite',
+          delegate: 'GPU',
+        },
+        runningMode: 'VIDEO',
+        maxResults: 5,
+        scoreThreshold: 0.3,
+      });
+      log('Object Detector loaded ✓');
+
+      const stream = await navigator.mediaDevices.getUserMedia({ video: true });
+      video.srcObject = stream;
+      await video.play();
+      log('Webcam started ✓');
+
+      startCalibration();
+    }
+
+    function startCalibration() {
+      calibration = null;
+      calibrationFrames = [];
+      isCalibrating = true;
+      statusEl.textContent = 'Calibrating... look at your screen';
+      statusEl.className = 'calibrating';
+      log('Calibrating for 3 seconds — look at your screen...');
+
+      setTimeout(() => {
+        isCalibrating = false;
+        if (calibrationFrames.length > 0) {
+          calibration = {
+            pitch: calibrationFrames.reduce((s, f) => s + f.pitch, 0) / calibrationFrames.length,
+            yaw: calibrationFrames.reduce((s, f) => s + f.yaw, 0) / calibrationFrames.length,
+          };
+          log(`Calibrated ✓ center=(pitch: ${calibration.pitch.toFixed(1)}°, yaw: ${calibration.yaw.toFixed(1)}°) from ${calibrationFrames.length} frames`);
+          statusEl.textContent = 'FOCUSED';
+          statusEl.className = 'focused';
+          gazeOk = true;
+          currentFocused = true;
+          document.getElementById('recalBtn').disabled = false;
+        } else {
+          log('⚠ No face detected during calibration! Try again.');
+          statusEl.textContent = 'No face detected';
+          statusEl.className = 'unfocused';
+        }
+      }, 3000);
+
+      if (!animFrame) detect();
+    }
+
+    function detect() {
+      if (!landmarker || !video || video.paused) return;
+      const now = performance.now();
+      frameCount += 1;
+
+      // --- Face Landmarker (every frame) ---
+      const faceResults = landmarker.detectForVideo(video, now);
+
+      if (faceResults.facialTransformationMatrixes?.length > 0) {
+        const m = faceResults.facialTransformationMatrixes[0].data;
+        const pitch = Math.asin(-m[6]) * (180 / Math.PI);
+        const yaw = Math.atan2(m[2], m[10]) * (180 / Math.PI);
+
+        pitchEl.textContent = pitch.toFixed(1);
+        yawEl.textContent = yaw.toFixed(1);
+
+        if (isCalibrating) {
+          calibrationFrames.push({ pitch, yaw });
+        } else if (calibration) {
+          const dp = Math.abs(pitch - calibration.pitch);
+          const dy = Math.abs(yaw - calibration.yaw);
+          dpitchEl.textContent = dp.toFixed(1);
+          dyawEl.textContent = dy.toFixed(1);
+
+          const yawThresh = parseFloat(yawThreshInput.value) || 25;
+          const pitchThresh = parseFloat(pitchThreshInput.value) || 25;
+
+          gazeOk = dp < pitchThresh && dy < yawThresh;
+          updateCombinedFocus();
+        }
+      } else if (!isCalibrating && calibration) {
+        if (gazeOk) {
+          gazeOk = false;
+          log('→ No face detected', 'log-unfocus');
+          updateCombinedFocus();
+        }
+        dpitchEl.textContent = '—';
+        dyawEl.textContent = '—';
+      }
+
+      // --- Object Detector (every Nth frame) ---
+      if (detector && frameCount % PHONE_DETECT_INTERVAL === 0) {
+        // Must use a separate timestamp call — MediaPipe VIDEO mode requires strictly increasing ts per model
+        const objNow = performance.now();
+        const objResults = detector.detectForVideo(video, objNow);
+        const phoneThresh = parseFloat(phoneThreshInput.value) || 0.30;
+
+        // Log ALL detections so we can see what the model recognizes
+        if (objResults.detections.length > 0) {
+          const labels = objResults.detections.map(
+            (d) => d.categories.map((c) => `${c.categoryName}(${(c.score * 100).toFixed(0)}%)`).join(',')
+          ).join(' | ');
+          phoneConfEl.textContent = labels;
+        } else {
+          phoneConfEl.textContent = '—';
+        }
+
+        const phoneDet = objResults.detections.find(
+          (d) => d.categories.some((c) => c.categoryName === 'cell phone' && c.score >= phoneThresh)
+        );
+        const hasPhone = !!phoneDet;
+        const bestConf = phoneDet
+          ? phoneDet.categories.find((c) => c.categoryName === 'cell phone')?.score
+          : null;
+
+        if (hasPhone !== phoneDetected) {
+          phoneDetected = hasPhone;
+          if (hasPhone) {
+            phoneBadge.textContent = '📱 PHONE DETECTED';
+            phoneBadge.className = 'phone-yes';
+            log(`→ Phone detected (${(bestConf * 100).toFixed(0)}% confidence)`, 'log-phone');
+          } else {
+            phoneBadge.textContent = '📱 No phone';
+            phoneBadge.className = 'phone-no';
+            log('→ Phone no longer detected', 'log-focus');
+          }
+          updateCombinedFocus();
+        }
+      }
+
+      animFrame = requestAnimationFrame(detect);
+    }
+
+    startBtn.addEventListener('click', init);
+    document.getElementById('recalBtn').addEventListener('click', () => {
+      log('Recalibrating...');
+      startCalibration();
+    });
+  </script>
+</body>
+</html>

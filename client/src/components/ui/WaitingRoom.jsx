@@ -340,8 +340,8 @@ export function WaitingRoom() {
   }, []);
 
   useEffect(() => {
-    socket.on('session_started', () => setPhase('session'));
-    return () => socket.off('session_started');
+    socket.on('session_start', () => setPhase('session'));
+    return () => socket.off('session_start');
   }, []);
 
   useEffect(() => {
@@ -899,42 +899,71 @@ export function WaitingRoom() {
         {/* Bottom action button */}
         {isHost ? (() => {
           const enoughPlayers = room.players.length >= 2;
-          const allReady = enoughPlayers && room.players.every((p) => p.ready);
-          const canStart = enoughPlayers && allReady;
-          const statusText = !enoughPlayers
+          const othersReady = enoughPlayers && room.players.filter((p) => p.socketId !== socket.id).every((p) => p.ready);
+          const canStart = ready && enoughPlayers && othersReady;
+          const statusText = !ready
+            ? ''
+            : !enoughPlayers
             ? 'NEED AT LEAST 2 PLAYERS'
-            : !allReady
+            : !othersReady
             ? 'WAITING FOR ALL PLAYERS TO READY UP'
             : 'ALL PLAYERS READY!';
-          const statusColor = allReady ? '#68B868' : '#444466';
+          const statusColor = canStart ? '#68B868' : '#444466';
           return (
             <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 8 }}>
-              <button
-                disabled={!canStart}
-                onClick={() => socket.emit('start_session', { roomCode: room.code })}
-                style={{
-                  fontFamily: "'Press Start 2P', monospace",
-                  fontSize: 10,
-                  padding: '12px 24px',
-                  background: canStart ? '#F8D030' : '#1a1a2e',
-                  color: canStart ? '#0A0A2E' : '#555',
-                  border: 'none',
-                  borderRadius: 4,
-                  cursor: canStart ? 'pointer' : 'not-allowed',
-                  opacity: canStart ? 1 : 0.4,
-                  letterSpacing: 1,
-                  boxShadow: canStart
-                    ? '0 4px 0 #B8860B, 0 0 12px rgba(248,208,48,0.4)'
-                    : 'none',
-                  textShadow: canStart ? '0 1px 0 rgba(0,0,0,0.3)' : 'none',
-                  width: '100%',
-                }}
-              >
-                START SESSION
-              </button>
-              <span style={{ fontFamily: "'Press Start 2P', monospace", fontSize: 6, color: statusColor }}>
-                {statusText}
-              </span>
+              {!ready ? (
+                <button
+                  onClick={() => {
+                    socket.emit('player_ready', { roomCode: room.code });
+                    setReady(true);
+                  }}
+                  style={{
+                    fontFamily: "'Press Start 2P', monospace",
+                    fontSize: 10,
+                    padding: '12px 24px',
+                    background: '#68B868',
+                    color: '#fff',
+                    border: 'none',
+                    borderRadius: 4,
+                    cursor: 'pointer',
+                    letterSpacing: 1,
+                    boxShadow: '0 4px 0 #3d7a3d, 0 0 12px rgba(104,184,104,0.3)',
+                    textShadow: '0 2px 4px rgba(0,0,0,0.4)',
+                    width: '100%',
+                  }}
+                >
+                  READY UP
+                </button>
+              ) : (
+                <button
+                  disabled={!canStart}
+                  onClick={() => socket.emit('start_session', { roomCode: room.code })}
+                  style={{
+                    fontFamily: "'Press Start 2P', monospace",
+                    fontSize: 10,
+                    padding: '12px 24px',
+                    background: canStart ? '#F8D030' : '#1a1a2e',
+                    color: canStart ? '#0A0A2E' : '#555',
+                    border: 'none',
+                    borderRadius: 4,
+                    cursor: canStart ? 'pointer' : 'not-allowed',
+                    opacity: canStart ? 1 : 0.4,
+                    letterSpacing: 1,
+                    boxShadow: canStart
+                      ? '0 4px 0 #B8860B, 0 0 12px rgba(248,208,48,0.4)'
+                      : 'none',
+                    textShadow: canStart ? '0 1px 0 rgba(0,0,0,0.3)' : 'none',
+                    width: '100%',
+                  }}
+                >
+                  START SESSION
+                </button>
+              )}
+              {statusText && (
+                <span style={{ fontFamily: "'Press Start 2P', monospace", fontSize: 6, color: statusColor }}>
+                  {statusText}
+                </span>
+              )}
             </div>
           );
         })() : (
