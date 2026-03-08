@@ -3,58 +3,56 @@ import axios from 'axios';
 import { useGameStore } from '../../store/gameStore.js';
 import { socket } from '../../lib/socket.js';
 import { usePhantomWallet } from '../../hooks/usePhantomWallet.js';
+import {
+  POKEMON_SPRITES,
+  fillRect,
+  drawPixelPokemon,
+  drawParticle,
+  drawStar,
+  drawGround,
+} from '../../lib/pixelArt.js';
 
-// ── Canvas background helpers (same as LandingPage) ──────────────────────────
+// ── Pokemon buddy data ────────────────────────────────────────────────────────
 
-function fillRect(ctx, x, y, w, h) {
-  ctx.fillRect(Math.round(x), Math.round(y), Math.round(w), Math.round(h));
-}
+const BUDDIES = [
+  { name: 'Pikachu',   color: '#F8D030' },
+  { name: 'Eevee',     color: '#C08850' },
+  { name: 'Bulbasaur', color: '#68B868' },
+  { name: 'Squirtle',  color: '#58A8E8' },
+  { name: 'Charmander',color: '#F08830' },
+];
 
-function drawParticle(ctx, x, y, size, color, alpha) {
-  ctx.globalAlpha = alpha;
-  ctx.fillStyle = color;
-  fillRect(ctx, x, y, size, size);
-  ctx.globalAlpha = 1;
-}
+// ── Animated mini canvas for each buddy card ─────────────────────────────────
 
-function drawStar(ctx, x, y, frame, seed) {
-  const twinkle = Math.sin(frame * 0.03 + seed * 7) * 0.5 + 0.5;
-  const size = seed > 0.7 ? 3 : seed > 0.4 ? 2 : 1;
-  ctx.globalAlpha = twinkle * 0.8 + 0.2;
-  ctx.fillStyle = seed > 0.8 ? '#F8D030' : seed > 0.5 ? '#A8D8F8' : '#FFFFFF';
-  fillRect(ctx, x, y, size, size);
-  ctx.globalAlpha = 1;
-}
+function BuddyMiniCanvas({ type, greyed }) {
+  const canvasRef = useRef(null);
 
-function drawGround(ctx, width, height, frame) {
-  const tileSize = 24;
-  const groundY = height - 100;
+  useEffect(() => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    const ctx = canvas.getContext('2d');
+    let frame = 0;
+    let animId;
 
-  ctx.fillStyle = '#2D5A1E';
-  ctx.fillRect(0, groundY, width, 100);
+    const draw = () => {
+      ctx.clearRect(0, 0, 64, 64);
+      if (greyed) ctx.globalAlpha = 0.35;
+      drawPixelPokemon(ctx, 10, 14, type, frame++, 2);
+      ctx.globalAlpha = 1;
+      animId = requestAnimationFrame(draw);
+    };
+    draw();
+    return () => cancelAnimationFrame(animId);
+  }, [type, greyed]);
 
-  for (let x = 0; x < width; x += tileSize) {
-    ctx.fillStyle = x % (tileSize * 2) === 0 ? '#347A24' : '#2D6A1E';
-    ctx.fillRect(x, groundY, tileSize, 4);
-
-    if (Math.sin(x * 0.5 + frame * 0.02) > 0.3) {
-      ctx.fillStyle = '#4CAF50';
-      const bladeOffset = Math.sin(frame * 0.05 + x * 0.1) * 2;
-      fillRect(ctx, x + 4 + bladeOffset, groundY - 4, 2, 6);
-      fillRect(ctx, x + 14 + bladeOffset * 0.7, groundY - 3, 2, 5);
-    }
-  }
-
-  ctx.fillStyle = '#8B7355';
-  ctx.fillRect(0, groundY + 20, width, 30);
-  ctx.fillStyle = '#9B8365';
-  for (let x = 0; x < width; x += 32) {
-    ctx.fillRect(x + 2, groundY + 22, 28, 26);
-  }
-  ctx.fillStyle = '#7B6345';
-  for (let x = 0; x < width; x += 32) {
-    ctx.fillRect(x, groundY + 20, 32, 2);
-  }
+  return (
+    <canvas
+      ref={canvasRef}
+      width={64}
+      height={64}
+      style={{ width: 64, height: 64, imageRendering: 'pixelated' }}
+    />
+  );
 }
 
 // ── Pixel art styles ──────────────────────────────────────────────────────────
@@ -199,6 +197,8 @@ export function WaitingRoom() {
   const [uploadDone, setUploadDone] = useState(false);
   const [ready, setReady] = useState(false);
   const [error, setError] = useState('');
+  const [selectedBuddy, setSelectedBuddy] = useState(null);
+  const [takenBuddies, setTakenBuddies] = useState({});
 
   // Canvas background
   const canvasRef = useRef(null);
@@ -233,6 +233,14 @@ export function WaitingRoom() {
     if (!canvas) return;
     const ctx = canvas.getContext('2d');
     let animId;
+
+    const pokemonPositions = [
+      { type: 'pikachu',    x: 80  },
+      { type: 'eevee',      x: 220 },
+      { type: 'bulbasaur',  x: 800 },
+      { type: 'squirtle',   x: 940 },
+      { type: 'charmander', x: 520 },
+    ];
 
     const render = () => {
       const frame = frameRef.current++;
@@ -274,11 +282,44 @@ export function WaitingRoom() {
 
       drawGround(ctx, w, h, frame);
 
+      // Pokemon sprites bouncing on the grass
+      const groundY = h - 100;
+      pokemonPositions.forEach((pkmn, i) => {
+        const yPos = groundY - 52 + Math.sin(frame * 0.06 + i * 1.5) * 3;
+        drawPixelPokemon(ctx, pkmn.x, yPos, pkmn.type, frame + i * 20, 3);
+        ctx.font = 'bold 10px monospace';
+        ctx.textAlign = 'center';
+        ctx.fillStyle = 'rgba(255,255,255,0.7)';
+        ctx.fillText(POKEMON_SPRITES[pkmn.type].name, pkmn.x + 24, yPos - 8);
+      });
+
+      // Pokeball decorations on ground
+      const pokeballPositions = [
+        { x: 400, y: groundY + 8 },
+        { x: 650, y: groundY + 12 },
+        { x: 150, y: groundY + 10 },
+      ];
+      pokeballPositions.forEach((pb) => {
+        ctx.fillStyle = '#E85050';
+        fillRect(ctx, pb.x, pb.y, 10, 5);
+        ctx.fillStyle = '#F8F8F8';
+        fillRect(ctx, pb.x, pb.y + 5, 10, 5);
+        ctx.fillStyle = '#282828';
+        fillRect(ctx, pb.x, pb.y + 4, 10, 2);
+        ctx.fillStyle = '#F8F8F8';
+        fillRect(ctx, pb.x + 4, pb.y + 3, 3, 3);
+      });
+
       animId = requestAnimationFrame(render);
     };
 
     render();
     return () => cancelAnimationFrame(animId);
+  }, []);
+
+  useEffect(() => {
+    socket.on('buddy_update', (data) => setTakenBuddies(data));
+    return () => socket.off('buddy_update');
   }, []);
 
   if (!room) return null;
@@ -321,6 +362,11 @@ export function WaitingRoom() {
 
   const canReady = !isLockedIn || (walletAddress && myPlayer?.escrowConfirmed);
 
+  function handleSelectBuddy(buddyName) {
+    setSelectedBuddy(buddyName);
+    socket.emit('select_buddy', { roomCode: room.code, buddy: buddyName });
+  }
+
   return (
     <div style={s.root}>
       <link
@@ -350,22 +396,82 @@ export function WaitingRoom() {
 
       <div style={s.card}>
         {/* Players */}
-        {room.players.map((p) => (
-          <div key={p.socketId} style={s.playerRow}>
-            <span>{p.username} {p.isHost ? '(host)' : ''}</span>
-            <div style={{ display: 'flex', gap: 8 }}>
-              {isLockedIn && <span style={s.badge(p.escrowConfirmed)}>
-                {p.escrowConfirmed ? 'Escrowed' : 'Pending SOL'}
-              </span>}
-              <span style={s.badge(p.ready)}>{p.ready ? 'Ready' : 'Not ready'}</span>
+        {room.players.map((p) => {
+          const playerBuddy = Object.entries(takenBuddies).find(([, uname]) => uname === p.username)?.[0];
+          const buddyColor = playerBuddy ? BUDDIES.find((b) => b.name === playerBuddy)?.color : null;
+          return (
+            <div key={p.socketId} style={s.playerRow}>
+              <span style={{ fontFamily: "'Press Start 2P', monospace", fontSize: 8, color: '#CCC' }}>
+                {p.username}{p.isHost ? ' (host)' : ''}
+                {playerBuddy && (
+                  <span style={{ color: buddyColor, fontSize: 7 }}> [{playerBuddy}]</span>
+                )}
+              </span>
+              <div style={{ display: 'flex', gap: 8 }}>
+                {isLockedIn && <span style={s.badge(p.escrowConfirmed)}>
+                  {p.escrowConfirmed ? 'Escrowed' : 'Pending SOL'}
+                </span>}
+                <span style={s.badge(p.ready)}>{p.ready ? 'Ready' : 'Not ready'}</span>
+              </div>
             </div>
-          </div>
-        ))}
+          );
+        })}
         {room.players.length < 2 && (
           <div style={s.playerRow}>
             <span style={{ color: '#444466', fontFamily: "'Press Start 2P', monospace", fontSize: 8 }}>Waiting for partner...</span>
           </div>
         )}
+
+        {/* Buddy selection */}
+        <div style={s.label}>CHOOSE YOUR BUDDY</div>
+        <div style={{ display: 'flex', gap: 8, justifyContent: 'center', flexWrap: 'wrap' }}>
+          {BUDDIES.map((buddy) => {
+            const takenBy = takenBuddies[buddy.name];
+            const isSelected = selectedBuddy === buddy.name;
+            const isTaken = takenBy && takenBy !== user?.username;
+            return (
+              <div
+                key={buddy.name}
+                onClick={() => !isTaken && handleSelectBuddy(buddy.name)}
+                style={{
+                  width: 80,
+                  textAlign: 'center',
+                  cursor: isTaken ? 'not-allowed' : 'pointer',
+                  padding: '8px 4px',
+                  borderRadius: 8,
+                  border: isSelected ? `2px solid ${buddy.color}` : '2px solid rgba(255,255,255,0.1)',
+                  backgroundColor: isSelected ? `${buddy.color}22` : 'rgba(255,255,255,0.03)',
+                  boxShadow: isSelected ? `0 0 15px ${buddy.color}44` : 'none',
+                  opacity: isTaken ? 0.4 : 1,
+                  transition: 'all 0.2s',
+                }}
+              >
+                <BuddyMiniCanvas type={buddy.name.toLowerCase()} greyed={isTaken} />
+                <div
+                  style={{
+                    fontFamily: "'Press Start 2P', monospace",
+                    fontSize: 6,
+                    color: isSelected ? buddy.color : isTaken ? '#444' : '#8888AA',
+                  }}
+                >
+                  {buddy.name}
+                </div>
+                {isTaken && (
+                  <div
+                    style={{
+                      fontFamily: "'Press Start 2P', monospace",
+                      fontSize: 5,
+                      color: '#555566',
+                      marginTop: 3,
+                    }}
+                  >
+                    {takenBy}
+                  </div>
+                )}
+              </div>
+            );
+          })}
+        </div>
 
         {/* Study material upload (host only) */}
         {isHost && (
