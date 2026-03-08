@@ -32,7 +32,7 @@ Buddy creates real consequences for distraction through three layers of accounta
 | Layer | Technology | What It Detects |
 |---|---|---|
 | **Physical Presence** | MediaPipe Face Landmarker | Head rotation >25° from center, user leaving frame |
-| **Screen Content** | Gemini 1.5 Flash Vision | Whether on-screen content is study material or a distraction |
+| **Screen Content** | Gemini 2.5 Flash Vision | Whether on-screen content is study material or a distraction |
 
 If MediaPipe says you're looking at the screen but Gemini Vision sees Twitter — you're caught. The system emits a "fake-focus" event, your pet reacts, and your teammates know.
 
@@ -67,7 +67,7 @@ Every 45 seconds, the app captures a screenshot of the user's shared screen and 
 ## Core Features
 
 ### 3D Pet Companions
-Custom-modeled low-poly pets built in Blender with three animation states: **Working**, **Idle**, and **Distracted/Sleeping**. Each pet species has a distinct ElevenLabs voice personality — the owl is dry and wise, the cat is sarcastic, the dog is enthusiastic. Voice lines fire on state changes: a disappointed sigh when your teammate loses focus, a cheer when you nail a quiz.
+Pokemon pets built in Blender with three animation states: **Working**, **Idle**, and **Distracted/Sleeping**. Each pet species has a distinct ElevenLabs voice personality — the owl is dry and wise, the cat is sarcastic, the dog is enthusiastic. Voice lines fire on state changes: a disappointed sigh when your teammate loses focus, a cheer when you nail a quiz.
 
 ### Surprise Quizzes
 Two types of quizzes test your knowledge:
