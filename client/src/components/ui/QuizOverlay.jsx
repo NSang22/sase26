@@ -1,6 +1,12 @@
 import { useState, useEffect, useRef } from 'react';
 import { socket } from '../../lib/socket.js';
 import { useGameStore } from '../../store/gameStore.js';
+import { playPokemonSfx } from '../../lib/audio.js';
+
+const QUIZ_REACTIONS = {
+  correct: ["Yes! Nailed it!", "Super effective!", "Big brain time!", "Too easy!", "Let's gooo!"],
+  wrong: ["Oof...", "Not quite...", "We'll get 'em next time", "Yikes...", "Unlucky..."],
+};
 
 const TIME_LIMIT_MS = 30000;
 
@@ -70,7 +76,7 @@ const s = {
 const OPTION_LABELS = ['A', 'B', 'C', 'D'];
 
 export function QuizOverlay({ question }) {
-  const { room, clearCurrentQuestion } = useGameStore();
+  const { room, clearCurrentQuestion, showPetBubble } = useGameStore();
   const [selected, setSelected] = useState(null);   // answerIndex (0-3)
   const [result, setResult] = useState(null);        // { correct, points, correctAnswerIndex }
   const [timeLeft, setTimeLeft] = useState(TIME_LIMIT_MS);
@@ -99,11 +105,20 @@ export function QuizOverlay({ question }) {
     function onAck(data) {
       if (data.questionId !== question.id) return;
       setResult(data);
+
+      // Play pet SFX + show reaction bubble for my pet
+      const myId = socket.id;
+      const myPlayer = room?.players?.find?.((p) => p.socketId === myId);
+      if (myPlayer?.pokemon) playPokemonSfx(myPlayer.pokemon);
+      const category = data.correct ? 'correct' : 'wrong';
+      const lines = QUIZ_REACTIONS[category];
+      showPetBubble(myId, lines[Math.floor(Math.random() * lines.length)]);
+
       setTimeout(() => clearCurrentQuestion(), 2500);
     }
     socket.on('quiz-answer-ack', onAck);
     return () => socket.off('quiz-answer-ack', onAck);
-  }, [question.id, clearCurrentQuestion]);
+  }, [question.id, clearCurrentQuestion, room, showPetBubble]);
 
   // When the question closes (timeout or all answered), dismiss if no ack received yet
   useEffect(() => {

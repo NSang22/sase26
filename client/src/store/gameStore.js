@@ -44,6 +44,24 @@ export const useGameStore = create((set, get) => ({
   summary: null,
   setSummary: (summary) => set({ summary }),
 
+  // ── Pet text bubbles ──────────────────────────────────────────────────────
+  // { [socketId]: string } — current reaction text to show over each pet
+  petBubbles: {},
+  showPetBubble: (socketId, text) => {
+    set((s) => ({ petBubbles: { ...s.petBubbles, [socketId]: text } }));
+    setTimeout(() => {
+      set((s) => {
+        const updated = { ...s.petBubbles };
+        if (updated[socketId] === text) delete updated[socketId];
+        return { petBubbles: updated };
+      });
+    }, 3000);
+  },
+
+  // ── Narrator audio ────────────────────────────────────────────────────────
+  narratorManifest: null, // { [category]: string[] }
+  setNarratorManifest: (m) => set({ narratorManifest: m }),
+
   // ── Derived helpers ───────────────────────────────────────────────────────
   mySocketId: null,
   setMySocketId: (id) => set({ mySocketId: id }),
