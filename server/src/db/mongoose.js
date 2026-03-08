@@ -11,6 +11,6 @@ export async function connectDB() {
     console.log('[db] Connected to MongoDB Atlas');
   } catch (err) {
     console.error('[db] Connection failed:', err.message);
-    process.exit(1);
+    console.warn('[db] Continuing without DB — leaderboard/session history will not persist');
   }
 }

@@ -48,7 +48,8 @@ export function useSocket() {
 
     socket.on('room_created', (room) => {
       setRoom(room);
-      setPhase('waiting');
+      // Navigation to 'waiting' is handled by LandingPage's socket.once('room_created')
+      // which also calls setUser — don't race it by changing phase here
     });
 
     socket.on('room_update', (room) => {
