@@ -25,6 +25,12 @@ class Room {
     this.endTime = null;
     this.createdAt = Date.now();
     this.petSpecies = 'cat';
+    // Buddy selection: buddyName -> username
+    this.buddySelections = {};
+    // Session settings (host-configurable)
+    this.duration = 25;
+    this.quizMode = 'frequency';
+    this.quizValue = 5;
     this._addPlayer(socketId, userId, username, true);
   }
 
@@ -48,6 +54,9 @@ class Room {
       walletAddress: null,
       escrowConfirmed: false,
       escrowTx: null,
+      // Screen analysis
+      screenConcepts: [],     // deduplicated concept strings
+      screenTimeline: [],     // { timestamp, subject, is_studying, distraction }
     });
   }
 
@@ -68,6 +77,34 @@ class Room {
   setReady(socketId) {
     const p = this.players.get(socketId);
     if (p) p.ready = true;
+  }
+
+  setUnready(socketId) {
+    const p = this.players.get(socketId);
+    if (p) p.ready = false;
+  }
+
+  selectBuddy(socketId, buddyName) {
+    const p = this.players.get(socketId);
+    if (!p) return;
+    // Remove any previous selection by this player
+    for (const [name, uname] of Object.entries(this.buddySelections)) {
+      if (uname === p.username) delete this.buddySelections[name];
+    }
+    // Check if this buddy is taken by someone else
+    if (this.buddySelections[buddyName] && this.buddySelections[buddyName] !== p.username) return;
+    this.buddySelections[buddyName] = p.username;
+  }
+
+  updateSettings(duration, quizMode, quizValue) {
+    this.duration = duration;
+    this.quizMode = quizMode;
+    this.quizValue = quizValue;
+  }
+
+  updateMode(mode, stakeAmount) {
+    this.mode = mode;
+    this.stakeAmount = stakeAmount;
   }
 
   allReady() {
@@ -97,6 +134,42 @@ class Room {
       p.focus_start_timestamp = now;
     }
     p.focused = focused;
+  }
+
+  // ── Screen analysis ──────────────────────────────────────────────────────
+
+  recordScreenAnalysis(socketId, analysis) {
+    const p = this.players.get(socketId);
+    if (!p) return;
+    // Append to timeline
+    p.screenTimeline.push({
+      timestamp: Date.now(),
+      subject: analysis.subject,
+      is_studying: analysis.is_studying,
+      distraction: analysis.distraction,
+    });
+    // Accumulate deduplicated concepts
+    for (const concept of analysis.key_concepts) {
+      if (!p.screenConcepts.includes(concept)) {
+        p.screenConcepts.push(concept);
+      }
+    }
+  }
+
+  getPlayerConcepts(socketId) {
+    return this.players.get(socketId)?.screenConcepts ?? [];
+  }
+
+  getAllTimelines() {
+    const timelines = {};
+    for (const [id, p] of this.players) {
+      timelines[id] = {
+        username: p.username,
+        timeline: p.screenTimeline,
+        concepts: p.screenConcepts,
+      };
+    }
+    return timelines;
   }
 
   getFocusState() {

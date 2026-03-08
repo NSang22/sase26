@@ -71,22 +71,26 @@ Each pet has three animation states:
 - Leveling unlocks cosmetic changes (accessories, glow effects, new species).
 - Session history is stored — users can see their focus trends over time.
 
-**Voice (ElevenLabs):**
-- Each pet species has a distinct voice personality (owl = dry/wise, cat = sarcastic, dog = enthusiastic).
-- Pre-generated voice lines triggered on state changes only (not continuous):
-  - Partner loses focus → disappointed reaction
-  - Quiz answered correctly → celebration
-  - Focus streak milestone → hype callout
-  - Session start/end → greeting/recap
-- **Quiz questions read aloud** by the pet — acts as a tutor, not a popup.
-- Keep lines sparse. Reactions fire on state *changes*, not continuously.
+**Voice & Audio (ElevenLabs + Pokémon SFX):**
+
+Two audio layers:
+
+1. **Pokémon SFX** — Each Pokémon species has its own sound-effect clips (bundled in `client/public/audio/pokemon/`). These play on state changes (focus lost, quiz correct, streak milestone, etc.) alongside a **text bubble** that appears over the pet with a short reaction message. No spoken dialogue from the pets — just cries/noises + text.
+
+2. **Narrator (ElevenLabs)** — A single "Professor Oak"-style narrator voice powered by ElevenLabs TTS. Used for:
+   - **Reading quiz questions aloud** — the narrator delivers each question so players can listen instead of just reading.
+   - **Session recaps** — at session end, Gemini generates a recap summary and the narrator speaks it.
+   - **Focus alerts** — e.g. "A trainer in the room lost focus!"
+   - **Session start countdown** — "Trainers, lock in!"
+
+Only one ElevenLabs voice ID is needed (`ELEVENLABS_VOICE_ID` in `.env`).
 
 ### 4.4 Surprise Quizzes (Gemini)
 
 - **Source:** Host uploads a PDF or text study guide during the waiting room phase. Parsed server-side via `pdf-parse`.
 - **Generation:** Gemini 1.5 Flash generates multiple-choice quiz JSON from the extracted text. Pre-generate a bank of 10-15 questions at session start, don't call the API mid-session.
 - **Trigger:** Server emits a quiz event every 5-10 minutes (randomized interval).
-- **UX:** 2D overlay on the 3D scene. All players answer the same question simultaneously. Pet reads the question aloud via ElevenLabs.
+- **UX:** 2D overlay on the 3D scene. All players answer the same question simultaneously. Narrator reads the question aloud via ElevenLabs.
 - **Scoring:** Correct answer + speed bonus. Results factor into final session score.
 
 ### 4.5 Solana Betting

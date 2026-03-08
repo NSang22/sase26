@@ -1,208 +1,14 @@
 import { useState, useEffect, useRef, useCallback } from "react";
-
-// Pixel art sprite data - each Pokemon drawn on canvas
-const POKEMON_SPRITES = {
-  pikachu: {
-    color: "#F8D030",
-    accent: "#B8860B",
-    cheeks: "#E85050",
-    size: 32,
-    name: "Pikachu",
-  },
-  eevee: {
-    color: "#C08850",
-    accent: "#F8E8C0",
-    cheeks: "#C08850",
-    size: 32,
-    name: "Eevee",
-  },
-  bulbasaur: {
-    color: "#68B868",
-    accent: "#48D0B0",
-    cheeks: "#68B868",
-    size: 32,
-    name: "Bulbasaur",
-  },
-  squirtle: {
-    color: "#58A8E8",
-    accent: "#C09858",
-    cheeks: "#58A8E8",
-    size: 32,
-    name: "Squirtle",
-  },
-  charmander: {
-    color: "#F08830",
-    accent: "#F8D030",
-    cheeks: "#F08830",
-    size: 32,
-    name: "Charmander",
-  },
-};
-
-// Pixel art renderer for a simple Pokemon-like sprite
-function drawPixelPokemon(ctx, x, y, pokemon, frame, scale = 3) {
-  const p = POKEMON_SPRITES[pokemon];
-  const s = scale;
-  const bounce = Math.sin(frame * 0.08) * 2 * s;
-  const blink = Math.floor(frame / 40) % 8 === 0;
-  const yOff = y + bounce;
-
-  ctx.imageSmoothingEnabled = false;
-
-  // Shadow
-  ctx.fillStyle = "rgba(0,0,0,0.25)";
-  ctx.beginPath();
-  ctx.ellipse(x + 8 * s, y + 18 * s, 6 * s, 2 * s, 0, 0, Math.PI * 2);
-  ctx.fill();
-
-  // Body
-  ctx.fillStyle = p.color;
-  fillRect(ctx, x + 3 * s, yOff + 6 * s, 10 * s, 10 * s);
-
-  // Head
-  ctx.fillStyle = p.color;
-  fillRect(ctx, x + 2 * s, yOff + 1 * s, 12 * s, 8 * s);
-
-  // Ears/features based on Pokemon
-  if (pokemon === "pikachu") {
-    ctx.fillStyle = p.color;
-    fillRect(ctx, x + 1 * s, yOff - 3 * s, 2 * s, 5 * s);
-    fillRect(ctx, x + 13 * s, yOff - 3 * s, 2 * s, 5 * s);
-    ctx.fillStyle = "#282828";
-    fillRect(ctx, x + 1 * s, yOff - 3 * s, 2 * s, 2 * s);
-    fillRect(ctx, x + 13 * s, yOff - 3 * s, 2 * s, 2 * s);
-    // Cheeks
-    ctx.fillStyle = p.cheeks;
-    fillRect(ctx, x + 1 * s, yOff + 5 * s, 2 * s, 2 * s);
-    fillRect(ctx, x + 13 * s, yOff + 5 * s, 2 * s, 2 * s);
-    // Tail
-    ctx.fillStyle = p.accent;
-    fillRect(ctx, x + 14 * s, yOff + 4 * s, 2 * s, 2 * s);
-    fillRect(ctx, x + 16 * s, yOff + 2 * s, 2 * s, 2 * s);
-    fillRect(ctx, x + 16 * s, yOff + 0 * s, 3 * s, 2 * s);
-  } else if (pokemon === "eevee") {
-    ctx.fillStyle = p.accent;
-    fillRect(ctx, x + 0 * s, yOff - 2 * s, 3 * s, 6 * s);
-    fillRect(ctx, x + 13 * s, yOff - 2 * s, 3 * s, 6 * s);
-    // Collar fluff
-    ctx.fillStyle = p.accent;
-    fillRect(ctx, x + 2 * s, yOff + 7 * s, 12 * s, 3 * s);
-    // Tail
-    fillRect(ctx, x + 14 * s, yOff + 4 * s, 3 * s, 6 * s);
-    fillRect(ctx, x + 16 * s, yOff + 2 * s, 2 * s, 4 * s);
-  } else if (pokemon === "bulbasaur") {
-    ctx.fillStyle = p.accent;
-    fillRect(ctx, x + 4 * s, yOff - 2 * s, 8 * s, 4 * s);
-    fillRect(ctx, x + 5 * s, yOff - 4 * s, 6 * s, 3 * s);
-    // Spots
-    ctx.fillStyle = "#48A068";
-    fillRect(ctx, x + 4 * s, yOff + 8 * s, 2 * s, 2 * s);
-    fillRect(ctx, x + 10 * s, yOff + 9 * s, 2 * s, 2 * s);
-  } else if (pokemon === "squirtle") {
-    ctx.fillStyle = p.accent;
-    fillRect(ctx, x + 3 * s, yOff + 8 * s, 10 * s, 8 * s);
-    // Shell pattern
-    ctx.fillStyle = "#805028";
-    fillRect(ctx, x + 5 * s, yOff + 10 * s, 6 * s, 4 * s);
-    // Tail
-    ctx.fillStyle = "#58A8E8";
-    fillRect(ctx, x + 14 * s, yOff + 10 * s, 3 * s, 3 * s);
-    fillRect(ctx, x + 16 * s, yOff + 8 * s, 2 * s, 3 * s);
-  } else if (pokemon === "charmander") {
-    // Tail flame
-    ctx.fillStyle = p.accent;
-    fillRect(ctx, x + 14 * s, yOff + 8 * s, 2 * s, 4 * s);
-    ctx.fillStyle = "#F85030";
-    fillRect(ctx, x + 15 * s, yOff + 6 * s, 3 * s, 4 * s);
-    ctx.fillStyle = "#F8D030";
-    fillRect(ctx, x + 16 * s, yOff + 4 * s + Math.sin(frame * 0.2) * s, 2 * s, 3 * s);
-    // Belly
-    ctx.fillStyle = "#F8E880";
-    fillRect(ctx, x + 5 * s, yOff + 8 * s, 6 * s, 6 * s);
-  }
-
-  // Eyes
-  if (!blink) {
-    ctx.fillStyle = "#282828";
-    fillRect(ctx, x + 4 * s, yOff + 3 * s, 2 * s, 2 * s);
-    fillRect(ctx, x + 10 * s, yOff + 3 * s, 2 * s, 2 * s);
-    // Eye shine
-    ctx.fillStyle = "#FFFFFF";
-    fillRect(ctx, x + 4 * s, yOff + 3 * s, 1 * s, 1 * s);
-    fillRect(ctx, x + 10 * s, yOff + 3 * s, 1 * s, 1 * s);
-  } else {
-    ctx.fillStyle = "#282828";
-    fillRect(ctx, x + 4 * s, yOff + 4 * s, 2 * s, 1 * s);
-    fillRect(ctx, x + 10 * s, yOff + 4 * s, 2 * s, 1 * s);
-  }
-
-  // Mouth - tiny smile
-  ctx.fillStyle = "#282828";
-  fillRect(ctx, x + 7 * s, yOff + 6 * s, 2 * s, 1 * s);
-
-  // Feet
-  ctx.fillStyle = p.color;
-  fillRect(ctx, x + 3 * s, yOff + 14 * s, 3 * s, 2 * s);
-  fillRect(ctx, x + 10 * s, yOff + 14 * s, 3 * s, 2 * s);
-}
-
-function fillRect(ctx, x, y, w, h) {
-  ctx.fillRect(Math.round(x), Math.round(y), Math.round(w), Math.round(h));
-}
-
-// Floating pixel particles
-function drawParticle(ctx, x, y, size, color, alpha) {
-  ctx.globalAlpha = alpha;
-  ctx.fillStyle = color;
-  fillRect(ctx, x, y, size, size);
-  ctx.globalAlpha = 1;
-}
-
-// Stars background
-function drawStar(ctx, x, y, frame, seed) {
-  const twinkle = Math.sin(frame * 0.03 + seed * 7) * 0.5 + 0.5;
-  const size = seed > 0.7 ? 3 : seed > 0.4 ? 2 : 1;
-  ctx.globalAlpha = twinkle * 0.8 + 0.2;
-  ctx.fillStyle = seed > 0.8 ? "#F8D030" : seed > 0.5 ? "#A8D8F8" : "#FFFFFF";
-  fillRect(ctx, x, y, size, size);
-  ctx.globalAlpha = 1;
-}
-
-// Ground tiles
-function drawGround(ctx, width, height, frame) {
-  const tileSize = 24;
-  const groundY = height - 100;
-
-  // Grass base
-  ctx.fillStyle = "#2D5A1E";
-  ctx.fillRect(0, groundY, width, 100);
-
-  // Grass pattern
-  for (let x = 0; x < width; x += tileSize) {
-    ctx.fillStyle = x % (tileSize * 2) === 0 ? "#347A24" : "#2D6A1E";
-    ctx.fillRect(x, groundY, tileSize, 4);
-
-    // Grass blades
-    if (Math.sin(x * 0.5 + frame * 0.02) > 0.3) {
-      ctx.fillStyle = "#4CAF50";
-      const bladeOffset = Math.sin(frame * 0.05 + x * 0.1) * 2;
-      fillRect(ctx, x + 4 + bladeOffset, groundY - 4, 2, 6);
-      fillRect(ctx, x + 14 + bladeOffset * 0.7, groundY - 3, 2, 5);
-    }
-  }
-
-  // Path
-  ctx.fillStyle = "#8B7355";
-  ctx.fillRect(0, groundY + 20, width, 30);
-  ctx.fillStyle = "#9B8365";
-  for (let x = 0; x < width; x += 32) {
-    ctx.fillRect(x + 2, groundY + 22, 28, 26);
-  }
-  ctx.fillStyle = "#7B6345";
-  for (let x = 0; x < width; x += 32) {
-    ctx.fillRect(x, groundY + 20, 32, 2);
-  }
-}
+import { useGameStore } from "../../store/gameStore.js";
+import { socket } from "../../lib/socket.js";
+import {
+  POKEMON_SPRITES,
+  fillRect,
+  drawPixelPokemon,
+  drawParticle,
+  drawStar,
+  drawGround,
+} from "../../lib/pixelArt.js";
 
 export default function BuddyLockIn() {
   const canvasRef = useRef(null);
@@ -214,10 +20,10 @@ export default function BuddyLockIn() {
   const [joinCode, setJoinCode] = useState("");
   const [hoveredBtn, setHoveredBtn] = useState(null);
   const [transitionPhase, setTransitionPhase] = useState("idle"); // idle | closing | pokeball | opening
-  const [selectedPokemon, setSelectedPokemon] = useState(null);
-  const [players, setPlayers] = useState([]);
   const [username, setUsername] = useState("");
   const [copied, setCopied] = useState(false);
+  const [showUsernameError, setShowUsernameError] = useState(false);
+  const { setPhase, setRoom, setUser } = useGameStore();
 
   // Generate room code
   const generateCode = useCallback(() => {
@@ -385,8 +191,48 @@ export default function BuddyLockIn() {
     triggerTransition("joinRoom");
   };
 
-  const handleStartSession = () => {
-    triggerTransition("session");
+  const handleEnterWaitingRoomAsHost = () => {
+    socket.emit("create_room", { username });
+
+    const fallback = setTimeout(() => {
+      setUser({ username });
+      setRoom({
+        code: roomCode,
+        players: [{ username, isHost: true, socketId: socket.id, ready: false }],
+        mode: "casual",
+        stakeAmount: 0,
+      });
+      setPhase("waiting");
+    }, 1000);
+
+    socket.once("room_created", (roomData) => {
+      clearTimeout(fallback);
+      setUser({ username });
+      setRoom(roomData);
+      setPhase("waiting");
+    });
+  };
+
+  const handleEnterWaitingRoomAsGuest = () => {
+    socket.emit("join_room", { roomCode: joinCode, username });
+
+    const fallback = setTimeout(() => {
+      setUser({ username });
+      setRoom({
+        code: joinCode,
+        players: [{ username, isHost: false, socketId: socket.id, ready: false }],
+        mode: "casual",
+        stakeAmount: 0,
+      });
+      setPhase("waiting");
+    }, 1000);
+
+    socket.once("room_joined", (roomData) => {
+      clearTimeout(fallback);
+      setUser({ username });
+      setRoom(roomData);
+      setPhase("waiting");
+    });
   };
 
 
@@ -433,65 +279,6 @@ export default function BuddyLockIn() {
     const b = Math.max(0, (num & 255) - 40);
     return `#${((r << 16) | (g << 8) | b).toString(16).padStart(6, "0")}`;
   }
-
-  // Pokemon selection card
-  const PokemonCard = ({ type, selected, onClick }) => {
-    const p = POKEMON_SPRITES[type];
-    const isSelected = selected === type;
-    const cardRef = useRef(null);
-    const miniCanvasRef = useRef(null);
-
-    useEffect(() => {
-      const canvas = miniCanvasRef.current;
-      if (!canvas) return;
-      const ctx = canvas.getContext("2d");
-      let frame = 0;
-      let animId;
-
-      const draw = () => {
-        ctx.clearRect(0, 0, 64, 64);
-        drawPixelPokemon(ctx, 10, 14, type, frame++, 2);
-        animId = requestAnimationFrame(draw);
-      };
-      draw();
-      return () => cancelAnimationFrame(animId);
-    }, [type]);
-
-    return (
-      <div
-        onClick={onClick}
-        ref={cardRef}
-        style={{
-          width: 72,
-          textAlign: "center",
-          cursor: "pointer",
-          padding: "6px 4px",
-          borderRadius: 8,
-          border: isSelected ? `2px solid ${p.color}` : "2px solid rgba(255,255,255,0.1)",
-          backgroundColor: isSelected ? `${p.color}22` : "rgba(255,255,255,0.03)",
-          boxShadow: isSelected ? `0 0 15px ${p.color}44` : "none",
-          transition: "all 0.2s",
-        }}
-      >
-        <canvas
-          ref={miniCanvasRef}
-          width={64}
-          height={64}
-          style={{ width: 64, height: 64, imageRendering: "pixelated" }}
-        />
-        <div
-          style={{
-            fontFamily: "'Press Start 2P', monospace",
-            fontSize: 7,
-            color: isSelected ? p.color : "#8888AA",
-            marginTop: 4,
-          }}
-        >
-          {p.name}
-        </div>
-      </div>
-    );
-  };
 
   return (
     <div
@@ -801,7 +588,7 @@ export default function BuddyLockIn() {
               type="text"
               placeholder="YOUR NAME"
               value={username}
-              onChange={(e) => setUsername(e.target.value.toUpperCase())}
+              onChange={(e) => { setUsername(e.target.value.toUpperCase()); setShowUsernameError(false); }}
               maxLength={12}
               style={{
                 fontFamily: "'Press Start 2P', monospace",
@@ -817,28 +604,17 @@ export default function BuddyLockIn() {
                 letterSpacing: 2,
               }}
             />
-
-            {/* Pokemon Selection */}
-            <p
-              style={{
+            {showUsernameError && !username.trim() && (
+              <p style={{
                 fontFamily: "'Press Start 2P', monospace",
-                fontSize: 8,
+                fontSize: 7,
                 color: "#E85050",
-                margin: "2px 0 0 0",
-              }}
-            >
-              CHOOSE YOUR BUDDY
-            </p>
-            <div style={{ display: "flex", gap: 6, flexWrap: "wrap", justifyContent: "center" }}>
-              {Object.keys(POKEMON_SPRITES).map((type) => (
-                <PokemonCard
-                  key={type}
-                  type={type}
-                  selected={selectedPokemon}
-                  onClick={() => setSelectedPokemon(type)}
-                />
-              ))}
-            </div>
+                margin: 0,
+                textShadow: "0 0 8px rgba(232,80,80,0.4)",
+              }}>
+                ENTER YOUR NAME!
+              </p>
+            )}
 
             {/* Players in room */}
             <div style={{ marginTop: 4, width: "100%" }}>
@@ -883,7 +659,7 @@ export default function BuddyLockIn() {
                       color: "#CCC",
                     }}
                   >
-                    {username || "YOU"} {selectedPokemon ? `(${POKEMON_SPRITES[selectedPokemon].name})` : ""}
+                    {username || "YOU"}
                   </span>
                   <span
                     style={{
@@ -912,12 +688,17 @@ export default function BuddyLockIn() {
               </PixelButton>
               <PixelButton
                 id="start"
-                onClick={handleStartSession}
+                onClick={() => {
+                  if (!username.trim()) { setShowUsernameError(true); return; }
+                  setShowUsernameError(false);
+                  handleEnterWaitingRoomAsHost();
+                }}
                 color="#68B868"
                 hoverColor="#78C878"
                 glowColor="#68B868"
+                style={{ opacity: username.trim() ? 1 : 0.4, cursor: username.trim() ? "pointer" : "not-allowed" }}
               >
-                START SESSION
+                ENTER WAITING ROOM
               </PixelButton>
             </div>
           </div>
@@ -981,7 +762,7 @@ export default function BuddyLockIn() {
               type="text"
               placeholder="YOUR NAME"
               value={username}
-              onChange={(e) => setUsername(e.target.value.toUpperCase())}
+              onChange={(e) => { setUsername(e.target.value.toUpperCase()); setShowUsernameError(false); }}
               maxLength={12}
               style={{
                 fontFamily: "'Press Start 2P', monospace",
@@ -997,28 +778,17 @@ export default function BuddyLockIn() {
                 letterSpacing: 2,
               }}
             />
-
-            {/* Pokemon Selection */}
-            <p
-              style={{
+            {showUsernameError && !username.trim() && (
+              <p style={{
                 fontFamily: "'Press Start 2P', monospace",
-                fontSize: 8,
+                fontSize: 7,
                 color: "#E85050",
-                margin: "2px 0 0 0",
-              }}
-            >
-              CHOOSE YOUR BUDDY
-            </p>
-            <div style={{ display: "flex", gap: 6, flexWrap: "wrap", justifyContent: "center" }}>
-              {Object.keys(POKEMON_SPRITES).map((type) => (
-                <PokemonCard
-                  key={type}
-                  type={type}
-                  selected={selectedPokemon}
-                  onClick={() => setSelectedPokemon(type)}
-                />
-              ))}
-            </div>
+                margin: 0,
+                textShadow: "0 0 8px rgba(232,80,80,0.4)",
+              }}>
+                ENTER YOUR NAME!
+              </p>
+            )}
 
             {/* Action buttons */}
             <div style={{ display: "flex", gap: 16, marginTop: 4 }}>
@@ -1034,62 +804,22 @@ export default function BuddyLockIn() {
               <PixelButton
                 id="joinGo"
                 onClick={() => {
-                  if (joinCode.length === 6) triggerTransition("makeRoom");
+                  if (!username.trim()) { setShowUsernameError(true); return; }
+                  setShowUsernameError(false);
+                  if (joinCode.length === 6) handleEnterWaitingRoomAsGuest();
                 }}
                 color="#58A8E8"
                 hoverColor="#68B8F8"
                 glowColor="#58A8E8"
-                style={{ opacity: joinCode.length === 6 ? 1 : 0.4 }}
+                style={{ opacity: username.trim() && joinCode.length === 6 ? 1 : 0.4, cursor: username.trim() && joinCode.length === 6 ? "pointer" : "not-allowed" }}
               >
-                JOIN
+                ENTER WAITING ROOM
               </PixelButton>
             </div>
           </div>
         )}
 
-        {screen === "session" && (
-          <div
-            style={{
-              display: "flex",
-              flexDirection: "column",
-              alignItems: "center",
-              justifyContent: "center",
-              gap: 16,
-              animation: "fadeInUp 0.6s ease-out",
-            }}
-          >
-            <div
-              style={{
-                fontFamily: "'Press Start 2P', monospace",
-                fontSize: 12,
-                color: "#68B868",
-                textShadow: "0 0 15px rgba(104,184,104,0.5)",
-                animation: "pulse 2s ease-in-out infinite",
-              }}
-            >
-              ENTERING STUDY ROOM...
-            </div>
-            <div
-              style={{
-                fontFamily: "'Press Start 2P', monospace",
-                fontSize: 8,
-                color: "#8888BB",
-                marginTop: 8,
-              }}
-            >
-              3D SESSION WOULD LOAD HERE
-            </div>
-            <PixelButton
-              id="backToLanding"
-              onClick={() => triggerTransition("landing")}
-              color="#444466"
-              hoverColor="#555577"
-              glowColor="#444466"
-            >
-              BACK TO LOBBY
-            </PixelButton>
-          </div>
-        )}
+
       </div>
 
       {/* CSS animations */}
