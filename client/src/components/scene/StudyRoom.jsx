@@ -1,14 +1,14 @@
 import { Suspense, useMemo } from 'react';
-import { useGLTF } from '@react-three/drei';
+import { ContactShadows, useGLTF } from '@react-three/drei';
 
 const TABLE_POSITION = [0, 1, -1.9];
-const TABLE_SCALE    = 2.0;
-const LAPTOP_SCALE   = 1.25;
+const TABLE_SCALE = 2.0;
+const LAPTOP_SCALE = 1.25;
 const LAPTOP_POSITIONS = [
-  [-0.60, 1.36, -1.70],
-  [ 0.60, 1.36, -1.70],
-  [-0.60, 1.36, -2.50],
-  [ 0.60, 1.36, -2.50],
+  [-0.6, 1.36, -1.7],
+  [0.6, 1.36, -1.7],
+  [-0.6, 1.36, -2.5],
+  [0.6, 1.36, -2.5],
 ];
 
 function TableModel() {
@@ -33,7 +33,7 @@ function DeskFallback() {
 }
 
 /**
- * Study-room environment. No walls — open scene.
+ * Study-room environment. No walls - open scene.
  * playerCount controls how many laptops appear on the table (max 4).
  */
 export function StudyRoom({ playerCount = 2 }) {
@@ -41,7 +41,6 @@ export function StudyRoom({ playerCount = 2 }) {
 
   return (
     <>
-      {/* ── Lighting ──────────────────────────────────────────────────────── */}
       <ambientLight intensity={0.35} color="#c0cce8" />
       <pointLight
         position={[0, 4.5, -1.9]}
@@ -53,13 +52,13 @@ export function StudyRoom({ playerCount = 2 }) {
       <directionalLight position={[-4, 5, 3]} intensity={0.35} color="#a0b8e0" />
       <pointLight position={[4, 1.5, 1]} intensity={0.5} color="#7c3aed" />
 
-      {/* ── Floor ─────────────────────────────────────────────────────────── */}
       <mesh receiveShadow rotation={[-Math.PI / 2, 0, 0]} position={[0, 0, 0]}>
         <planeGeometry args={[20, 20]} />
         <meshStandardMaterial color="#1c1610" roughness={0.95} />
       </mesh>
 
-      {/* ── Table + Laptops ───────────────────────────────────────────────── */}
+      <ContactShadows position={[0, 0, 0]} opacity={0.5} scale={10} blur={2} far={1} />
+
       <Suspense fallback={<DeskFallback />}>
         <TableModel />
         {visibleLaptops.map((pos, i) => (

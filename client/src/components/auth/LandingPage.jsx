@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, useCallback } from "react";
+﻿import { useState, useEffect, useRef } from "react";
 import { useGameStore } from "../../store/gameStore.js";
 import { socket } from "../../lib/socket.js";
 import {
@@ -15,22 +15,13 @@ export default function BuddyLockIn() {
   const frameRef = useRef(0);
   const starsRef = useRef([]);
   const particlesRef = useRef([]);
-  const [screen, setScreen] = useState("landing"); // landing, makeRoom, joinRoom
-  const [roomCode, setRoomCode] = useState("");
+  const [screen, setScreen] = useState("landing"); // landing, makeRoom, joinRoom, soloRoom
   const [joinCode, setJoinCode] = useState("");
   const [hoveredBtn, setHoveredBtn] = useState(null);
   const [transitionPhase, setTransitionPhase] = useState("idle"); // idle | closing | pokeball | opening
   const [username, setUsername] = useState("");
   const [showUsernameError, setShowUsernameError] = useState(false);
   const { setPhase, setRoom, setUser } = useGameStore();
-
-  // Generate room code
-  const generateCode = useCallback(() => {
-    const chars = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
-    let code = "";
-    for (let i = 0; i < 6; i++) code += chars[Math.floor(Math.random() * chars.length)];
-    return code;
-  }, []);
 
   // Init stars
   useEffect(() => {
@@ -165,14 +156,14 @@ export default function BuddyLockIn() {
     return () => cancelAnimationFrame(animId);
   }, []);
 
-  // Pokeball battle transition: circle wipe close → pokeball → circle wipe open
+  // Pokeball battle transition: circle wipe close â†’ pokeball â†’ circle wipe open
   const triggerTransition = (targetScreen) => {
-    setTransitionPhase("closing"); // clip-path animates from 150% → 0% over 300ms
+    setTransitionPhase("closing"); // clip-path animates from 150% â†’ 0% over 300ms
     setTimeout(() => {
       setTransitionPhase("pokeball"); // fully closed; change screen now
       setScreen(targetScreen);
       setTimeout(() => {
-        setTransitionPhase("opening"); // clip-path animates from 0% → 150% over 300ms
+        setTransitionPhase("opening"); // clip-path animates from 0% â†’ 150% over 300ms
         setTimeout(() => {
           setTransitionPhase("idle");
         }, 300);
@@ -181,8 +172,6 @@ export default function BuddyLockIn() {
   };
 
   const handleMakeRoom = () => {
-    const code = generateCode();
-    setRoomCode(code);
     triggerTransition("makeRoom");
   };
 
@@ -190,13 +179,37 @@ export default function BuddyLockIn() {
     triggerTransition("joinRoom");
   };
 
+  const handleStudySolo = () => {
+    triggerTransition("soloRoom");
+  };
+
+  const handleStartSolo = () => {
+    if (!username.trim()) { setShowUsernameError(true); return; }
+    setShowUsernameError(false);
+
+    socket.emit("create_room", { username, mode: "solo" });
+
+    socket.once("room_created", (roomData) => {
+      setUser({ username });
+      setRoom(roomData);
+      // Emit start_session immediately â€” solo rooms need no waiting room
+      socket.emit("start_session", { roomCode: roomData.code });
+      socket.once("session_start", () => {
+        setPhase("session");
+      });
+    });
+  };
+
   const handleEnterWaitingRoomAsHost = () => {
     socket.emit("create_room", { username });
 
     const fallback = setTimeout(() => {
+      const chars = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
+      let code = "";
+      for (let i = 0; i < 6; i++) code += chars[Math.floor(Math.random() * chars.length)];
       setUser({ username });
       setRoom({
-        code: roomCode,
+        code,
         players: [{ username, isHost: true, socketId: socket.id, ready: false }],
         mode: "casual",
         stakeAmount: 0,
@@ -310,7 +323,7 @@ export default function BuddyLockIn() {
         }}
       />
 
-      {/* Pokeball transition — dark backdrop */}
+      {/* Pokeball transition â€” dark backdrop */}
       {transitionPhase === "pokeball" && (
         <div
           style={{
@@ -323,7 +336,7 @@ export default function BuddyLockIn() {
         />
       )}
 
-      {/* Pokeball transition — pokeball icon */}
+      {/* Pokeball transition â€” pokeball icon */}
       {transitionPhase === "pokeball" && (
         <div
           style={{
@@ -383,7 +396,7 @@ export default function BuddyLockIn() {
         </div>
       )}
 
-      {/* UI Layer — clip-path drives the circle wipe animation */}
+      {/* UI Layer â€” clip-path drives the circle wipe animation */}
       <div
         style={{
           position: "relative",
@@ -479,6 +492,15 @@ export default function BuddyLockIn() {
                 JOIN ROOM
               </PixelButton>
             </div>
+            <PixelButton
+              id="solo"
+              onClick={handleStudySolo}
+              color="#7c3aed"
+              hoverColor="#8b5cf6"
+              glowColor="#7c3aed"
+            >
+              STUDY SOLO
+            </PixelButton>
 
             {/* Version tag */}
             <p
@@ -489,7 +511,7 @@ export default function BuddyLockIn() {
                 marginTop: 20,
               }}
             >
-              v0.1.0 — HACKATHON BUILD
+              v0.1.0 â€” HACKATHON BUILD
             </p>
           </div>
         )}
@@ -524,6 +546,7 @@ export default function BuddyLockIn() {
             >
               YOUR ROOM
             </h2>
+
 
             {/* Username */}
             <input
@@ -641,6 +664,102 @@ export default function BuddyLockIn() {
                 style={{ opacity: username.trim() ? 1 : 0.4, cursor: username.trim() ? "pointer" : "not-allowed" }}
               >
                 ENTER WAITING ROOM
+              </PixelButton>
+            </div>
+          </div>
+        )}
+
+        {screen === "soloRoom" && (
+          <div
+            style={{
+              display: "flex",
+              flexDirection: "column",
+              alignItems: "center",
+              gap: 12,
+              animation: "fadeInUp 0.4s ease-out",
+              backgroundColor: "rgba(10,10,46,0.85)",
+              padding: "20px 32px",
+              borderRadius: 12,
+              border: "2px solid rgba(124,58,237,0.3)",
+              boxShadow: "0 0 40px rgba(124,58,237,0.2)",
+              backdropFilter: "blur(8px)",
+              maxWidth: 440,
+            }}
+          >
+            <h2
+              style={{
+                fontFamily: "'Press Start 2P', monospace",
+                fontSize: 16,
+                color: "#a78bfa",
+                margin: 0,
+                textShadow: "0 0 15px rgba(124,58,237,0.4)",
+              }}
+            >
+              STUDY SOLO
+            </h2>
+            <p
+              style={{
+                fontFamily: "'Press Start 2P', monospace",
+                fontSize: 7,
+                color: "#666688",
+                margin: 0,
+                textAlign: "center",
+                lineHeight: 1.8,
+              }}
+            >
+              AI STUDY AGENT + PERSONALIZED QUIZZES
+            </p>
+
+            <input
+              type="text"
+              placeholder="YOUR NAME"
+              value={username}
+              onChange={(e) => { setUsername(e.target.value.toUpperCase()); setShowUsernameError(false); }}
+              maxLength={12}
+              style={{
+                fontFamily: "'Press Start 2P', monospace",
+                fontSize: 11,
+                padding: "10px 16px",
+                backgroundColor: "rgba(0,0,0,0.4)",
+                border: "2px solid rgba(124,58,237,0.3)",
+                borderRadius: 6,
+                color: "#FFF",
+                textAlign: "center",
+                outline: "none",
+                width: 220,
+                letterSpacing: 2,
+              }}
+            />
+            {showUsernameError && !username.trim() && (
+              <p style={{
+                fontFamily: "'Press Start 2P', monospace",
+                fontSize: 7,
+                color: "#E85050",
+                margin: 0,
+              }}>
+                ENTER YOUR NAME!
+              </p>
+            )}
+
+            <div style={{ display: "flex", gap: 16, marginTop: 4 }}>
+              <PixelButton
+                id="backSolo"
+                onClick={() => triggerTransition("landing")}
+                color="#444466"
+                hoverColor="#555577"
+                glowColor="#444466"
+              >
+                BACK
+              </PixelButton>
+              <PixelButton
+                id="startSolo"
+                onClick={handleStartSolo}
+                color="#7c3aed"
+                hoverColor="#8b5cf6"
+                glowColor="#7c3aed"
+                style={{ opacity: username.trim() ? 1 : 0.4 }}
+              >
+                LOCK IN
               </PixelButton>
             </div>
           </div>

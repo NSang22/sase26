@@ -38,6 +38,27 @@ const s = {
     alignItems: 'center',
   },
   label: { color: '#a78bfa', fontSize: 13, fontWeight: 700, letterSpacing: 2, textTransform: 'uppercase' },
+  bloomBadge: (level) => ({
+    padding: '2px 8px',
+    background:
+      level === 'analysis'     ? 'rgba(124,58,237,0.3)' :
+      level === 'application'  ? 'rgba(59,130,246,0.3)' :
+      level === 'comprehension'? 'rgba(16,185,129,0.3)' : 'rgba(107,114,128,0.3)',
+    border: `1px solid ${
+      level === 'analysis'     ? '#7c3aed' :
+      level === 'application'  ? '#3b82f6' :
+      level === 'comprehension'? '#10b981' : '#6b7280'
+    }`,
+    borderRadius: 8,
+    fontSize: 10,
+    fontWeight: 700,
+    color: '#e8e8f0',
+    textTransform: 'uppercase',
+    letterSpacing: 1,
+  }),
+  sourceConcept: {
+    fontSize: 11, color: '#7c3aed', fontStyle: 'italic', marginTop: -8,
+  },
   question: { fontSize: 20, fontWeight: 600, lineHeight: 1.5, color: '#e8e8f0' },
   options: { display: 'flex', flexDirection: 'column', gap: 10 },
   optionBtn: (state) => ({
@@ -120,15 +141,19 @@ export function QuizOverlay({ question }) {
     return () => socket.off('quiz-answer-ack', onAck);
   }, [question.id, clearCurrentQuestion, room, showPetBubble]);
 
-  // When the question closes (timeout or all answered), dismiss if no ack received yet
+  // When the question closes (timeout or all answered), dismiss overlay.
+  // Handles both PDF (data.questionId) and personalized rounds (data.roundId).
   useEffect(() => {
     function onResults(data) {
-      if (data.questionId !== question.id) return;
+      // PDF question: match on questionId
+      if (data.questionId && data.questionId !== question.id) return;
+      // Personalized round: match on our question being in this round
+      if (data.roundId && question.roundId && data.roundId !== question.roundId) return;
       setTimeout(() => clearCurrentQuestion(), 2500);
     }
     socket.on('quiz-results', onResults);
     return () => socket.off('quiz-results', onResults);
-  }, [question.id, clearCurrentQuestion]);
+  }, [question.id, question.roundId, clearCurrentQuestion]);
 
   function submitAnswer(answerIndex) {
     if (selected !== null || result) return;
@@ -156,8 +181,13 @@ export function QuizOverlay({ question }) {
     <div style={s.backdrop}>
       <div style={s.card}>
         <div style={s.header}>
-          <span style={s.label}>Quiz Time</span>
-          <span style={{ color: '#a78bfa', fontWeight: 700, fontSize: 15 }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+            <span style={s.label}>{question.personalized ? 'Personalized Quiz' : 'Quiz Time'}</span>
+            {question.bloom_level && (
+              <span style={s.bloomBadge(question.bloom_level)}>{question.bloom_level}</span>
+            )}
+          </div>
+          <span style={{ color: pct < 30 ? '#ef4444' : '#a78bfa', fontWeight: 700, fontSize: 15 }}>
             {(timeLeft / 1000).toFixed(1)}s
           </span>
         </div>
@@ -165,6 +195,10 @@ export function QuizOverlay({ question }) {
         <div style={{ ...s.timer, width: `${pct}%`, background: pct < 30 ? '#dc2626' : '#7c3aed' }} />
 
         <div style={s.question}>{question.question}</div>
+
+        {question.source_concept && (
+          <div style={s.sourceConcept}>Concept: {question.source_concept}</div>
+        )}
 
         <div style={s.options}>
           {question.options.map((text, i) => (

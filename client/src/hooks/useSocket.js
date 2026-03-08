@@ -3,16 +3,11 @@ import { socket, connectSocket } from '../lib/socket.js';
 import { useGameStore } from '../store/gameStore.js';
 import { playAudio, playQuestionAudio, playPokemonSfx } from '../lib/audio.js';
 
-// Pet reaction text lines (matches server PET_REACTIONS)
 const PET_REACTIONS = {
-  'focus-lost': ["Huh?! Stay focused!", "Hey! Don't zone out!", "Come back!", "No slacking off!", "Focus!"],
-  'focus-regained': ["Welcome back!", "Let's go!", "That's the spirit!", "Locked in again!", "Back on track!"],
+  'focus-lost': ["Huh?! Stay focused!", "Hey! Don't zone out!", 'Come back!', 'No slacking off!', 'Focus!'],
+  'focus-regained': ['Welcome back!', "Let's go!", "That's the spirit!", 'Locked in again!', 'Back on track!'],
 };
 
-/**
- * Wires up all socket event listeners for the active session.
- * Call this once inside a component that lives for the session lifetime.
- */
 export function useSocket() {
   const {
     setMySocketId,
@@ -27,6 +22,7 @@ export function useSocket() {
     setNarratorManifest,
     setScreenAnalysis,
     setFakeFocusWarning,
+    setPlayerSubject,
     patchSummary,
   } = useGameStore();
 
@@ -37,10 +33,11 @@ export function useSocket() {
   useEffect(() => {
     connectSocket();
 
-    // Fetch narrator manifest on connect
     fetch('/api/audio/narrator')
-      .then((r) => r.ok ? r.json() : null)
-      .then((m) => { if (m) setNarratorManifest(m); })
+      .then((r) => (r.ok ? r.json() : null))
+      .then((m) => {
+        if (m) setNarratorManifest(m);
+      })
       .catch(() => {});
 
     socket.on('connect', () => {
@@ -49,8 +46,6 @@ export function useSocket() {
 
     socket.on('room_created', (room) => {
       setRoom(room);
-      // Navigation to 'waiting' is handled by LandingPage's socket.once('room_created')
-      // which also calls setUser — don't race it by changing phase here
     });
 
     socket.on('room_update', (room) => {
@@ -59,35 +54,32 @@ export function useSocket() {
 
     socket.on('session_start', ({ startTime, narratorAudioUrl, roomState }) => {
       const store = useGameStore.getState();
-      // Atomically sync the latest room state (with buddySelections) before
-      // switching phase so StudySession always renders the right Pokemon.
       if (roomState) store.setRoom(roomState);
       store.setSessionStartTime(startTime);
+      useGameStore.setState({ screenShareResolved: false, studyStarted: false });
       setPhase('session');
       if (narratorAudioUrl) playAudio(narratorAudioUrl, { priority: true });
     });
 
-    // Track previous focus to detect changes for SFX/bubbles
     const prevFocus = {};
 
     socket.on('focus_update', ({ playerId, focused, players }) => {
       const states = {};
-      players.forEach((p) => { states[p.socketId] = p.focused; });
+      players.forEach((p) => {
+        states[p.socketId] = p.focused;
+      });
       setFocusStates(states);
 
-      // Detect focus *change* for the player who triggered this event
       if (playerId && prevFocus[playerId] !== undefined && prevFocus[playerId] !== focused) {
         const category = focused ? 'focus-regained' : 'focus-lost';
         const lines = PET_REACTIONS[category];
         const text = lines[Math.floor(Math.random() * lines.length)];
         showPetBubble(playerId, text);
 
-        // Play Pokemon SFX for the player's pet
         const room = useGameStore.getState().room;
         const player = room?.players?.find?.((p) => p.socketId === playerId);
         if (player?.pokemon) playPokemonSfx(player.pokemon);
 
-        // Play narrator focus alert if someone lost focus
         if (!focused) {
           const manifest = useGameStore.getState().narratorManifest;
           const urls = manifest?.['focus-alert'];
@@ -97,19 +89,17 @@ export function useSocket() {
           }
         }
       }
-      // Update tracking
-      players.forEach((p) => { prevFocus[p.socketId] = p.focused; });
+
+      players.forEach((p) => {
+        prevFocus[p.socketId] = p.focused;
+      });
     });
 
-    // surprise-quiz: { question, windowMs }
     socket.on('surprise-quiz', ({ question }) => {
       setCurrentQuestion(question);
       if (question.audioUrl) playQuestionAudio(question.audioUrl);
     });
 
-    // quiz-answer-ack: private result for the answering player (handled in QuizOverlay)
-
-    // quiz-results: broadcast after question closes; update scores for everyone
     socket.on('quiz-results', ({ scores }) => {
       setScores(scores);
     });
@@ -117,17 +107,14 @@ export function useSocket() {
     socket.on('session_end', (summary) => {
       setSummary(summary);
       setPhase('recap');
-      // Play narrator session-end line
       const manifest = useGameStore.getState().narratorManifest;
       const urls = manifest?.['session-end'];
       if (urls?.length) {
         const url = urls[Math.floor(Math.random() * urls.length)];
         if (url) playAudio(url);
       }
-      // recapAudioUrl arrives later via session_recap_update
     });
 
-    // Background AI results arrive after session_end — patch them into the summary
     socket.on('session_recap_update', (patch) => {
       patchSummary(patch);
       if (patch.recapAudioUrl) {
@@ -135,19 +122,33 @@ export function useSocket() {
       }
     });
 
-    // ── Screen analysis from server ────────────────────────────────────────
     socket.on('screen-analysis', (data) => {
       setScreenAnalysis(data);
+      const myId = useGameStore.getState().mySocketId;
+      if (myId) setPlayerSubject(myId, data);
     });
 
-    socket.on('fake-focus', ({ distraction }) => {
-      setFakeFocusWarning(distraction);
+    socket.on('subject_update', ({ socketId, subject, is_studying, distraction }) => {
+      setPlayerSubject(socketId, { subject, is_studying, distraction });
+    });
+
+    socket.on('fake-focus', ({ playerId, distraction }) => {
       const myId = useGameStore.getState().mySocketId;
-      if (myId) showPetBubble(myId, '🚨 I see you slacking!');
+      if (playerId === myId) {
+        setFakeFocusWarning(distraction);
+        if (myId) showPetBubble(myId, 'Caught slacking!');
+      } else if (playerId) {
+        showPetBubble(playerId, `Distracted: ${distraction || 'off-task'}`);
+      }
     });
 
     socket.on('player_left', ({ playerId }) => {
       console.warn('[socket] Player left:', playerId);
+    });
+
+    socket.on('room_closed', () => {
+      useGameStore.getState().setRoom(null);
+      setPhase('login');
     });
 
     socket.on('error', ({ message }) => {
@@ -155,7 +156,7 @@ export function useSocket() {
     });
 
     socket.on('escrow_ready', () => {
-      console.log('[socket] All escrows confirmed — session can start');
+      console.log('[socket] All escrows confirmed - session can start');
     });
 
     return () => {
@@ -169,12 +170,29 @@ export function useSocket() {
       socket.off('session_end');
       socket.off('session_recap_update');
       socket.off('screen-analysis');
+      socket.off('subject_update');
       socket.off('fake-focus');
       socket.off('player_left');
+      socket.off('room_closed');
       socket.off('error');
       socket.off('escrow_ready');
     };
-  }, [setMySocketId, setRoom, setPhase, updateFocusState, setFocusStates, setScores, setCurrentQuestion, setSummary, patchSummary]);
+  }, [
+    setMySocketId,
+    setRoom,
+    setPhase,
+    updateFocusState,
+    setFocusStates,
+    setScores,
+    setCurrentQuestion,
+    setSummary,
+    patchSummary,
+    setNarratorManifest,
+    setScreenAnalysis,
+    setFakeFocusWarning,
+    setPlayerSubject,
+    showPetBubble,
+  ]);
 
   return { emit, socket };
 }

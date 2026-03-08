@@ -67,7 +67,7 @@ export class QuizService {
       console.warn('[quiz] GEMINI_API_KEY not set — quiz generation will fail');
     }
     this.genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY || 'missing');
-    this.model = this.genAI.getGenerativeModel({ model: 'gemini-3.1-pro-preview' });
+    this.model = this.genAI.getGenerativeModel({ model: 'gemini-2.5-flash' });
   }
 
   /**

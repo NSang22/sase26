@@ -46,8 +46,22 @@ export const useGameStore = create((set, get) => ({
   patchSummary: (patch) => set((s) => ({ summary: s.summary ? { ...s.summary, ...patch } : patch })),
 
   // ── Screen analysis ────────────────────────────────────────────────────────
-  screenAnalysis: null, // latest { is_studying, subject, key_concepts, distraction }
+  screenAnalysis: null, // latest { is_studying, subject, key_concepts, distraction, bloom_max_level }
   setScreenAnalysis: (a) => set({ screenAnalysis: a }),
+
+  // Subject status for every player (updated from subject_update socket events)
+  playerSubjects: {}, // { [socketId]: { subject, is_studying, distraction } }
+  setPlayerSubject: (socketId, data) =>
+    set((s) => ({ playerSubjects: { ...s.playerSubjects, [socketId]: data } })),
+
+  // ── Screen share modal ─────────────────────────────────────────────────
+  // Persisted in store so component remounts don't reset modal visibility
+  screenShareResolved: false, // true once sharing succeeded, was denied, or was skipped
+  setScreenShareResolved: () => set({ screenShareResolved: true }),
+
+  // true once user clicks "Start Studying" or "Skip mini-player"
+  studyStarted: false,
+  setStudyStarted: () => set({ studyStarted: true }),
 
   fakeFocusWarning: null, // distraction string when fake-focus detected
   setFakeFocusWarning: (msg) => {

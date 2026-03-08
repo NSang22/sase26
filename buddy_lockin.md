@@ -1,12 +1,12 @@
-# Buddy! Lock In! — Full Project Spec
+﻿# Buddy: Lock In â€” Full Project Spec
 
-> **Tagline:** If you lose focus, your pet falls asleep — and your money's on the line.
+> **Tagline:** If you lose focus, your pet falls asleep â€” and your money's on the line.
 
 ---
 
 ## 1. Concept
 
-A gamified co-working web app where up to four users join a synchronized 3D study room. Browser-based AI tracks each user's focus via webcam. Pets react to your behavior in real time — and optionally, real SOL is at stake. Surprise quizzes generated from uploaded study materials keep you honest. Persistent accounts mean your pet levels up across sessions.
+A gamified co-working web app where up to 4 users join a synchronized 3D study room. Everyone studies their own material â€” a dual-layer AI system tracks physical focus via webcam AND analyzes screen content to verify you're actually studying. Personalized quizzes are generated from what each player is actually looking at, difficulty-normalized across subjects so scoring is fair. Pets react to your behavior in real time â€” and optionally, real SOL is at stake. Persistent accounts mean your pet levels up across sessions.
 
 ---
 
@@ -14,12 +14,12 @@ A gamified co-working web app where up to four users join a synchronized 3D stud
 
 | Prize | Hook |
 |---|---|
-| **Overall Best Gamification** | Pets, points, streaks, leveling, betting, leaderboards — the entire app is gamification |
+| **Overall Best Gamification** | Pets, points, streaks, leveling, betting, leaderboards â€” the entire app is gamification |
 | **Best Use of Solana** | Real-money escrow betting on focus sessions |
-| **Best Use of Gemini API** | Quiz generation from study materials + session recap/study tips |
+| **Best Use of Gemini API** | Gemini Vision for real-time screen analysis + concept extraction. Gemini Flash for personalized quiz generation with Bloom's taxonomy normalization + session study reports. |
 | **Best Use of Blender** | Custom-modeled and animated 3D pets |
 | **Best Use of ElevenLabs** | Voiced pet reactions + spoken quiz questions |
-| **Best Use of AI** | MediaPipe face tracking + Gemini LLM — two distinct AI layers |
+| **Best Use of AI** | Three-layer AI: perception (MediaPipe), cognition (Gemini Vision + Flash), interaction (ElevenLabs). Dual-layer focus detection + cross-subject difficulty normalization via Bloom's taxonomy. |
 | **Best Overall** | Full-stack, polished, multi-tech integration with a clear user story |
 
 ---
@@ -48,14 +48,14 @@ The original problem: why does anyone care if a virtual pet falls asleep?
 
 **Answer: three layers of stakes.**
 
-1. **Social pressure.** Your distraction affects other players' pets, not just yours. If you zone out, their pets lose energy or get sad. You're not letting yourself down — you're impacting the whole room.
-2. **Real money (optional).** In "Locked In" mode, up to 4 players escrow SOL. The winner (focus % + quiz accuracy) takes the pot. Every glance at your phone is money walking away.
-3. **Persistent progression.** Your pet levels up across sessions. Focus streaks unlock cosmetics, new pet species, titles. You've invested hours into this pet — you're not going to let it down now.
+1. **Social pressure.** Your distraction affects your *partner's* pet, not just yours. If you zone out, their pet loses energy or gets sad. You're not letting yourself down â€” you're screwing someone else over.
+2. **Real money (optional).** In "Locked In" mode, both players escrow SOL. The winner (focus % + quiz accuracy) takes the pot. Every glance at your phone is money walking away.
+3. **Persistent progression.** Your pet levels up across sessions. Focus streaks unlock cosmetics, new pet species, titles. You've invested hours into this pet â€” you're not going to let it down now.
 
 ### 4.2 Focus Tracking (MediaPipe)
 
 - **Calibration:** 3-second webcam check at session start to establish "center" gaze.
-- **Detection:** Head rotation >25° from center OR user disappears from frame → `isLockedIn = false`.
+- **Detection:** Head rotation >25Â° from center OR user disappears from frame â†’ `isLockedIn = false`.
 - **Data sent over socket:** Only a boolean `{ focused: true/false }`. No video leaves the client. Ever.
 - **Visual cue:** A neon "Lock-In" ring glows under the pet when focused. Dims/dies when distracted.
 
@@ -64,63 +64,133 @@ The original problem: why does anyone care if a virtual pet falls asleep?
 Each pet has three animation states:
 - **Working:** Happily studying, small idle movements.
 - **Idle:** Neutral, waiting.
-- **Distracted/Sleeping:** Triggered when owner loses focus. visible to all players.
+- **Distracted/Sleeping:** Triggered when owner loses focus. Visible to both players.
 
 **Progression (persisted via MongoDB):**
 - Pets earn XP from focus time and quiz performance.
 - Leveling unlocks cosmetic changes (accessories, glow effects, new species).
-- Session history is stored — users can see their focus trends over time.
+- Session history is stored â€” users can see their focus trends over time.
 
-**Voice & Audio (ElevenLabs + Pokémon SFX):**
+**Voice (ElevenLabs):**
+- Each pet species has a distinct voice personality (owl = dry/wise, cat = sarcastic, dog = enthusiastic).
+- Pre-generated voice lines triggered on state changes only (not continuous):
+  - Partner loses focus â†’ disappointed reaction
+  - Quiz answered correctly â†’ celebration
+  - Focus streak milestone â†’ hype callout
+  - Session start/end â†’ greeting/recap
+- **Quiz questions read aloud** by the pet â€” acts as a tutor, not a popup.
+- Keep lines sparse. Reactions fire on state *changes*, not continuously.
 
-Two audio layers:
+### 4.4 Study Modes
 
-1. **Pokémon SFX** — Each Pokémon species has its own sound-effect clips (bundled in `client/public/audio/pokemon/`). These play on state changes (focus lost, quiz correct, streak milestone, etc.) alongside a **text bubble** that appears over the pet with a short reaction message. No spoken dialogue from the pets — just cries/noises + text.
+**Two modes:**
 
-2. **Narrator (ElevenLabs)** — A single "Professor Oak"-style narrator voice powered by ElevenLabs TTS. Used for:
-   - **Reading quiz questions aloud** — the narrator delivers each question so players can listen instead of just reading.
-   - **Session recaps** — at session end, Gemini generates a recap summary and the narrator speaks it.
-   - **Focus alerts** — e.g. "A trainer in the room lost focus!"
-   - **Session start countdown** — "Trainers, lock in!"
+| Mode | Description |
+|---|---|
+| **Individual (Default)** | Everyone studies their own material. The screen agent watches what each person is learning and generates personalized quizzes from their actual screen content. |
+| **Collaborative (Stretch Goal)** | Host uploads shared study material (PDF/text). All players get the same quizzes from the uploaded content. Traditional shared-study mode. Only build if time allows. |
 
-Only one ElevenLabs voice ID is needed (`ELEVENLABS_VOICE_ID` in `.env`).
+### 4.5 Screen-Aware Study Agent
 
-### 4.4 Surprise Quizzes (Gemini)
+The frontend captures a screenshot of the user's shared screen every 45 seconds via `getDisplayMedia()` and sends it to the server as a base64 JPEG (quality 0.6).
 
-- **Source:** Host uploads a PDF or text study guide during the waiting room phase. Parsed server-side via `pdf-parse`.
-- **Generation:** Gemini 1.5 Flash generates multiple-choice quiz JSON from the extracted text. Pre-generate a bank of 10-15 questions at session start, don't call the API mid-session.
-- **Trigger:** Server emits a quiz event every 5-10 minutes (randomized interval).
-- **UX:** 2D overlay on the 3D scene. All players answer the same question simultaneously. Narrator reads the question aloud via ElevenLabs.
-- **Scoring:** Correct answer + speed bonus. Results factor into final session score.
+**Server-side pipeline per capture:**
+1. Send screenshot to Gemini 1.5 Flash Vision: classify as study vs distraction, identify subject, extract up to 5 key concepts.
+2. Store results on the player object: accumulate a `concepts` array and a `timeline` array (timestamp + subject + is_studying boolean).
+3. If MediaPipe says `focused=true` but screen analysis says `is_studying=false`, override focus to false and emit a "fake-focus" event. The system catches you even if you're staring at Twitter while facing your webcam.
+4. Optionally, also extract `document.body.innerText` from the active tab as supplementary context for more accurate concept identification (lightweight DOM text extraction alongside the screenshot).
 
-### 4.5 Solana Betting
+**If user denies screen sharing permission:** Fall back to MediaPipe-only focus tracking. Note in the UI that screen analysis is disabled. Quizzes won't generate for that player â€” they compete on focus score only.
+
+### 4.6 Personalized Quiz Generation (Individual Mode)
+
+**The core problem:** Four people studying four different subjects need quizzes of comparable difficulty so the scoring is fair.
+
+**The approach â€” Bloom's Taxonomy Difficulty Normalization:**
+- Every quiz round, the server picks a Bloom's level for that round (recall, comprehension, application, analysis). All players get the same level.
+- For each player, Gemini generates a question at that Bloom's level from that player's extracted concepts.
+- Example: At "application" level, the orgo student gets a reaction mechanism application question while the linear algebra student gets an eigenvalue application problem. Different subjects, same cognitive demand.
+
+**Quiz flow:**
+1. Server accumulates concepts from each player's screen captures over time.
+2. Every 5-10 minutes (randomized), server triggers a quiz round.
+3. For each player, server sends their accumulated concepts to Gemini with the prompt: "Generate 1 multiple-choice question at [Bloom's level] difficulty from these concepts: [concepts]. Return JSON: { question, options (4), correct_answer_index, explanation, bloom_level, source_concept }."
+4. Each player receives their own personalized question simultaneously. Pet reads it aloud via ElevenLabs.
+5. All players answer at the same time. Speed bonus applies.
+
+**Fallback:** If difficulty normalization isn't ready, just generate questions from each player's concepts independently without the Bloom's leveling. The feature still works â€” it's just less fair for betting. Explain the Bloom's framework verbally in the pitch even if it's not fully implemented.
+
+**Session-end comprehension quiz:**
+- At session end, Gemini generates 5 additional questions from each player's full concept history â€” testing whether they retained what they actually looked at.
+- These are separate from the periodic quizzes and test deeper comprehension.
+
+### 4.7 Collaborative Mode (Stretch Goal)
+
+- Host uploads a PDF or text study guide during the waiting room phase. Parsed server-side via `pdf-parse`.
+- Gemini pre-generates a bank of 10-15 questions from the uploaded material at session start.
+- All players get the same questions simultaneously.
+- This is the simpler mode â€” only build if individual mode is solid and time allows.
+
+### 4.8 Scoring System
+
+**Composite score from four metrics:**
+
+| Metric | Weight | Description |
+|---|---|---|
+| **Focus Score** | 0.50 | Percentage of session time in focused state (both MediaPipe + screen content) |
+| **Quiz Accuracy** | 0.20 | Percentage of quiz questions answered correctly |
+| **Response Time** | 0.15 | Average time to answer questions, normalized against a baseline (faster = better) |
+| **Consistency** | 0.15 | Low variance in focus = higher score. Steady 80% beats alternating 100%/0%. |
+
+`total_score = 0.50 * focus + 0.20 * accuracy + 0.15 * response_time_score + 0.15 * consistency`
+
+This gives a richer leaderboard with multiple metrics to display during the demo â€” not just a single number.
+
+**Metrics tracked per player during session:**
+- `total_focused_ms` / `total_session_ms` â†’ focus percentage
+- `screen_study_ms` / `total_session_ms` â†’ screen-verified study percentage
+- `questions_correct` / `questions_total` â†’ quiz accuracy
+- `answer_times[]` â†’ average response time
+- `focus_state_changes[]` â†’ calculate variance for consistency
+- `concepts_extracted[]` â†’ subjects studied
+- `distraction_log[]` â†’ what they got distracted by and when
+
+### 4.9 Solana Betting
 
 **Two modes:**
 
 | Mode | Description |
 |---|---|
 | **Casual** | No wallet needed. Points are just points. Full functionality minus the money. |
-| **Locked In** | Up to 4 players connect Phantom wallets and stake SOL into an escrow program. |
+| **Locked In** | Both players connect Phantom wallets and stake SOL into an escrow program. |
 
 **Betting flow:**
 1. Host creates room and sets stake amount (e.g., 0.1 SOL).
-2. Up to 4 players connect Phantom wallets in the waiting room.
+2. All players connect Phantom wallets in the waiting room. Before betting, players can see each other's on-chain study reputation (focus hours, win rate, XP tokens held) to make informed decisions about whether to enter.
 3. All players send SOL to a server-controlled wallet. Session cannot start until all transactions confirm.
-4. During session, staked amount is visible on screen at all times.
-5. On session end, server calculates winner via weighted score: `0.8 * focus_percentage + 0.2 * quiz_accuracy`. Focus is the core metric — quizzes are bonus reinforcement, not the main event.
-6. Server sends funds from the held wallet to the winner's address.
-7. Ties -> funds returned to all tied players (or split evenly by rule).
+4. During session, staked amount and pot total are visible on screen at all times.
+5. On session end, server calculates rankings via the composite score: `0.50 * focus + 0.20 * quiz_accuracy + 0.15 * response_time_score + 0.15 * consistency`.
+6. Server executes a **single atomic Solana transaction** that does everything at once:
+   - Splits the pot proportionally by ranking (e.g., 1st: 50%, 2nd: 30%, 3rd: 20%, 4th: 0%).
+   - Mints SPL tokens to all participants: a winner token to 1st place, and XP tokens to everyone proportional to their focus score.
+   - If the transaction fails, nobody gets paid and no tokens mint â€” no partial state.
+7. Ties between top scorers â†’ equal split of their combined share.
 
-**Note:** This is a server-managed escrow (centralized). Production version would use an Anchor on-chain program for trustless resolution. For a hackathon MVP, the demo is identical and saves hours of Rust development.
+**Why Solana and not Stripe:**
+- **Atomic multi-player payouts.** One transaction splits the pot to 4 wallets proportionally. No partial failures, fractions of a cent in fees. Stripe would need 4 separate API calls with 4 processing fees.
+- **On-chain study reputation.** SPL tokens encode your study history (focus hours, wins, XP) on your wallet. Before entering a bet, you can verify an opponent's track record â€” like a poker player's public hand history. A database can be faked; a wallet history is verifiable and portable across platforms.
+- **Single atomic transaction = payout + reputation mint.** Stakes resolve and reputation updates in one indivisible operation. This isn't using Solana as a payment rail â€” it's using it as a trustless competitive study protocol.
+
+**Note:** Server-managed escrow for the MVP. Production version would use an Anchor on-chain program for fully trustless resolution.
 
 **Demo strategy:** Show casual mode first to explain the mechanics. Then reveal "but what if the stakes were real?" and demo the wallet flow. That's the pitch moment.
 
-### 4.6 Persistence (MongoDB Atlas)
+### 4.10 Persistence (MongoDB Atlas)
 
 **Collections:**
-- `users` — username, wallet address (optional), pet species, pet level, XP, cosmetics unlocked
-- `sessions` — room code, participants, start/end time, focus scores, quiz results, winner, stake amount
-- `leaderboard` — aggregated stats: total focus time, win rate, quiz accuracy, streaks
+- `users` â€” username, wallet address (optional), pet species, pet level, XP, cosmetics unlocked
+- `sessions` â€” room code, participants, start/end time, focus scores, quiz results, winner, stake amount
+- `leaderboard` â€” aggregated stats: total focus time, win rate, quiz accuracy, streaks
 
 **Why this matters for judging:** It lets you show a leaderboard with real historical data during the demo. Pre-seed it with test data from practice sessions so it doesn't look empty.
 
@@ -129,58 +199,66 @@ Only one ElevenLabs voice ID is needed (`ELEVENLABS_VOICE_ID` in `.env`).
 ## 5. User Flow
 
 ### 5.1 Entry
-1. Landing page → Sign up / Log in (simple username + password, or wallet-based auth).
+1. Landing page â†’ Sign up / Log in (simple username + password, or wallet-based auth).
 2. Create or join a room via Room Code.
 3. Select pet species (first time) or see your existing pet.
 
 ### 5.2 Waiting Room
-1. Host uploads study material (PDF/text).
-2. Up to 4 players ready up.
-3. If "Locked In" mode: all players connect Phantom wallets and approve escrow.
-4. System pre-generates quiz bank from uploaded material (Gemini).
-5. System pre-generates voice lines for quiz questions (ElevenLabs).
+1. All players ready up.
+2. If "Locked In" mode: all connect Phantom wallets and approve escrow.
+3. If Collaborative mode: host uploads study material (PDF/text), system pre-generates quiz bank (Gemini).
+4. System pre-generates pet voice lines (ElevenLabs).
 
 ### 5.3 Session
 1. HTML UI fades out, 3D canvas mounts.
 2. Webcam calibration (3 seconds).
-3. Timer starts. Pets begin in "Working" state.
-4. Focus tracking runs continuously. State changes sync via Socket.io.
-5. Quizzes fire every 5-10 minutes. Pet reads question aloud.
-6. Points accumulate in real time, visible to all players.
+3. Screen share permission requested (for screen-aware agent). Falls back to MediaPipe-only if denied.
+4. Timer starts. Pets begin in "Working" state.
+5. Focus tracking runs continuously (dual-layer: MediaPipe + screen content). State changes sync via Socket.io.
+6. Screen agent captures every 45 seconds, extracts concepts, builds study timeline.
+7. Personalized quizzes fire every 5-10 minutes â€” each player gets a question from their own material, difficulty-normalized via Bloom's taxonomy.
+8. Pet reads question aloud. All players answer simultaneously.
+9. Composite scores accumulate in real time, visible to all players.
 
 ### 5.4 Session End
-1. Timer expires or all players end manually.
-2. Recap screen: focus time %, quiz accuracy, total points.
-3. If betting: escrow resolves, funds transfer shown on screen.
-4. XP awarded, pet progression updated in MongoDB.
-5. Session saved to history. Leaderboard updated.
+1. Timer expires or majority vote to end.
+2. Session-end comprehension quiz: 5 questions per player from their full extracted concept history.
+3. Gemini generates personalized study report per player: time breakdown by subject, distraction patterns, recommendations for what to review.
+4. Recap screen: composite score breakdown (focus, accuracy, response time, consistency), study timeline, quiz results.
+5. If betting: atomic Solana transaction â€” pot split + reputation tokens minted.
+6. XP awarded, pet progression updated in MongoDB.
+7. Session saved to history. Leaderboard updated.
 
 ---
 
 ## 6. Team Split (3 People, 24 Hours)
 
-### Person A — Blender + Assets
+### Person A â€” Blender + Assets
 - Model 2-3 pet species (low-poly, expressive).
 - Model the room/desk environment.
 - Rig and animate 3 states per pet: Working, Idle, Distracted/Sleeping.
 - Export as .glb with named animation clips.
 - **Hour 1 deliverable:** Export a placeholder cube with 3 named animation clips so frontend can build against the contract. Agree on scale, orientation, and clip names.
 
-### Person B — Frontend + 3D + UX
+### Person B â€” Frontend + 3D + UX
 - React + Vite scaffold.
 - R3F scene: mount room, mount pets, wire animation states to focus status.
-- Waiting room UI, quiz overlay, leaderboard/recap screens.
+- Waiting room UI, quiz overlay, leaderboard/recap screens, study report display.
+- Screen capture integration: `getDisplayMedia()` â†’ canvas â†’ base64 JPEG â†’ Socket.io emit every 45 seconds. Handle permission denial gracefully.
+- Display detected subject pill/badge ("Studying: Organic Chemistry" / "Distracted: Twitter").
 - Phantom wallet connect integration (frontend side).
 - ElevenLabs audio playback (triggered on events).
 - MediaPipe integration (runs client-side, emits focus boolean).
 
-### Person C — Backend + Blockchain
+### Person C â€” Backend + Blockchain + Screen Agent
 - Node.js + Express + Socket.io server.
-- Room management (create/join, ready states).
-- Gemini API integration: PDF parsing → quiz generation.
+- Room management (create/join, ready states, up to 4 players).
+- Screen agent: receive screenshots via Socket.io, send to Gemini Vision for content classification + concept extraction, build per-player study timelines, detect fake-focus.
+- Personalized quiz generation: accumulate concepts per player, generate difficulty-normalized questions using Bloom's taxonomy levels via Gemini.
+- Session-end comprehension quiz + study report generation via Gemini.
 - ElevenLabs API: pre-generate voice clips for quiz questions + pet reactions.
-- MongoDB Atlas: user accounts, session storage, leaderboard queries.
-- Solana integration (@solana/web3.js): server-managed wallet, receive stakes, send payouts to winner.
+- MongoDB Atlas: user accounts, session storage, leaderboard queries, study reports.
+- Solana integration (@solana/web3.js): server-managed wallet, receive stakes, atomic payout + SPL token minting.
 
 ---
 
@@ -189,7 +267,7 @@ Only one ElevenLabs voice ID is needed (`ELEVENLABS_VOICE_ID` in `.env`).
 | Asset | Source | Notes |
 |---|---|---|
 | Pet models (.glb) | Custom (Blender) | 2-3 species, 3 animation clips each |
-| Room/desk model (.glb) | Custom (Blender) or Poly.pizza | Cozy, up to four-seat setup |
+| Room/desk model (.glb) | Custom (Blender) or Poly.pizza | Cozy, two-seat setup |
 | Pet voice lines | ElevenLabs API | ~15-20 clips per species, pre-generated |
 | Quiz audio | ElevenLabs API | Generated per session from quiz text |
 
@@ -197,17 +275,17 @@ Only one ElevenLabs voice ID is needed (`ELEVENLABS_VOICE_ID` in `.env`).
 
 ## 8. Demo Script (3-Minute Pitch)
 
-**[0:00-0:30] Hook.** "What if studying actually had consequences? Meet Buddy." Show the landing page. Up to 4 users join a room.
+**[0:00-0:30] Hook.** "Study tools track what you consume. Nothing tracks whether you're actually learning. Meet Buddy." Show the landing page. Four users join a room â€” each studying different subjects.
 
-**[0:30-1:00] The Core Loop.** Show the 3D room, up to four pets studying. One player looks away -> other players' pets react, the voice line fires. "Your focus doesn't just affect you -> it affects the whole room."
+**[0:30-1:00] The Core Loop.** Show the 3D room, four pets studying. One player switches to Instagram â€” their pet reacts, voice line fires, teammates see the distraction. "Our AI doesn't just check if you're facing the screen. It knows what's on your screen."
 
-**[1:00-1:30] Quizzes.** A surprise quiz pops up. The pet reads it aloud. All players answer. Points update live.
+**[1:00-1:30] Personalized Quizzes.** Quiz round fires. Each player gets a different question from their own material, at the same Bloom's taxonomy difficulty level. "Same cognitive demand, different subjects. The playing field is level."
 
-**[1:30-2:00] The Stakes.** "But what if the stakes were real?" Show Phantom wallet connect. Show the escrow. "Now every distraction costs you money."
+**[1:30-2:00] The Stakes.** "But what if the stakes were real?" Show Phantom wallet connect. Show the escrow. Pot splits proportionally. Reputation tokens mint. "One atomic Solana transaction â€” payout and reputation in a single operation."
 
-**[2:00-2:30] Progression.** Show the MongoDB-backed profile. Pet level, session history, leaderboard. "This isn't a one-time gimmick — your pet grows with you."
+**[2:00-2:30] Session Recap.** Show the study report: time breakdown by subject, distraction log, comprehension quiz results, Gemini's personalized review recommendations. Show the pet leveling up, the leaderboard. "Your growth persists across sessions."
 
-**[2:30-3:00] Tech + Close.** Quick tech stack slide: MediaPipe, Gemini, ElevenLabs, Solana, Blender, MongoDB. "Six technologies, one seamless experience. Buddy: Lock In."
+**[2:30-3:00] Tech + Close.** "AI at three layers â€” perception with MediaPipe, cognition with Gemini Vision and Flash, interaction with ElevenLabs. Plus Solana as a trustless study protocol, Blender for custom 3D companions, and MongoDB for persistence. Buddy: Lock In."
 
 ---
 
@@ -216,10 +294,11 @@ Only one ElevenLabs voice ID is needed (`ELEVENLABS_VOICE_ID` in `.env`).
 | Risk | Mitigation |
 |---|---|
 | .glb animation pipeline issues | Agree on model contract (scale, clip names, orientation) in hour 1. Placeholder cube for early frontend dev. |
-| Gemini returns malformed quiz JSON | Validate and retry with stricter prompt. Pre-generate full quiz bank at session start, not on-the-fly. |
+| Gemini returns malformed quiz JSON | Validate and retry with stricter prompt. Catch and skip bad questions. |
+| Difficulty normalization isn't fair | Bloom's taxonomy is the framework, but fallback to unnormalized per-player quizzes if it's not working. Explain the framework verbally in the pitch. |
+| Screen capture denied by user | Graceful fallback to MediaPipe-only. Player competes on focus score only, no quizzes generated for them. |
+| Gemini Vision rate limits from 4 players Ã— captures every 45s | Stagger captures across players (player 1 at 0s, player 2 at 11s, player 3 at 22s, player 4 at 33s). Increase interval to 60s if hitting limits. |
 | Solana transfer bugs during demo | Have casual mode as fallback. Demo with devnet SOL and pre-funded wallets. |
-| ElevenLabs rate limits | Pre-generate all voice lines during waiting room phase. Cache aggressively. |
-| Two-laptop demo failure | Support same-machine demo: two browser tabs, one with webcam, one simulated. |
+| ElevenLabs rate limits | Pre-generate pet voice lines at startup. Generate quiz audio on-demand but cache aggressively. |
+| Multi-laptop demo failure | Support same-machine demo: multiple browser tabs, one with webcam, others simulated. |
 | MongoDB connection issues | Pre-seed data locally. Have a local fallback or show screenshots of leaderboard if Atlas is down. |
-
-## Built by Nikhil, Abhay, and Kushagra

@@ -1,4 +1,4 @@
-import express from 'express';
+﻿import express from 'express';
 import { createServer } from 'http';
 import { Server } from 'socket.io';
 import cors from 'cors';
@@ -6,6 +6,7 @@ import dotenv from 'dotenv';
 import multer from 'multer';
 import { join, dirname } from 'path';
 import { fileURLToPath } from 'url';
+import { randomUUID } from 'crypto';
 import { connectDB } from './db/mongoose.js';
 import { RoomManager } from './rooms/roomManager.js';
 import { QuizService } from './quiz/quizService.js';
@@ -46,7 +47,7 @@ const voiceService = new VoiceService();
 const escrowService = new EscrowService();
 const screenAgent = new ScreenAgent();
 
-// ── REST routes ──────────────────────────────────────────────────────────────
+// â”€â”€ REST routes â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 // Accepts a PDF or text file + roomCode in form-data.
 // Generates quiz bank, stores it on the room, pre-generates TTS audio.
@@ -89,7 +90,7 @@ app.get('/api/rooms/:code/escrow-address', (req, res) => {
   res.json({ address: escrowService.getDepositAddress() });
 });
 
-// ── On-chain reputation ───────────────────────────────────────────────────────
+// â”€â”€ On-chain reputation â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 // GET /api/reputation/:walletAddress
 // Returns BUDDY_WIN + BUDDY_XP balances for the waiting room pre-match display.
 app.get('/api/reputation/:walletAddress', async (req, res) => {
@@ -102,12 +103,12 @@ app.get('/api/reputation/:walletAddress', async (req, res) => {
   }
 });
 
-// ── Bet / escrow REST endpoints ───────────────────────────────────────────────
+// â”€â”€ Bet / escrow REST endpoints â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 const LAMPORTS_PER_SOL = 1_000_000_000;
 
 /**
- * Snapshot of escrow state for a room — used by both the verify response
+ * Snapshot of escrow state for a room â€” used by both the verify response
  * and the status polling endpoint.
  */
 function getBetStatus(room) {
@@ -160,7 +161,7 @@ app.post('/api/bet/verify', async (req, res) => {
   const player = [...room.players.values()].find((p) => p.walletAddress === walletAddress);
   if (!player) {
     return res.status(400).json({
-      error: 'Wallet not registered in room — emit wallet_connected first',
+      error: 'Wallet not registered in room â€” emit wallet_connected first',
     });
   }
   if (player.escrowConfirmed) {
@@ -171,7 +172,7 @@ app.post('/api/bet/verify', async (req, res) => {
   const valid = await escrowService.verifyDeposit(txSignature, walletAddress, room.stakeAmount);
   if (!valid) {
     return res.status(400).json({
-      error: 'Transaction could not be verified — check signature, amount, and confirmation status',
+      error: 'Transaction could not be verified â€” check signature, amount, and confirmation status',
     });
   }
 
@@ -182,7 +183,7 @@ app.post('/api/bet/verify', async (req, res) => {
   const allConfirmed = room.allEscrowConfirmed();
   if (allConfirmed) {
     io.to(roomCode).emit('escrow_ready');
-    if (shouldStartSession(room)) startSession(room);
+    // Host must still click START SESSION â€” no auto-start
   }
 
   res.json({ confirmed: true, allConfirmed, status: getBetStatus(room) });
@@ -200,7 +201,7 @@ app.get('/api/bet/status/:roomCode', (req, res) => {
   res.json(getBetStatus(room));
 });
 
-// Returns pre-generated narrator URLs grouped by category → index[]
+// Returns pre-generated narrator URLs grouped by category â†’ index[]
 // Client uses this on mount to know which files exist before events fire.
 app.get('/api/audio/narrator', (_req, res) => {
   res.json(voiceService.getNarratorManifest());
@@ -224,14 +225,36 @@ app.post('/api/rooms/:code/material/reuse', (_req, res) => {
   res.status(501).json({ error: 'Not implemented yet' });
 });
 
-// Screen analysis timeline for all players in a room
+// Screen analysis timeline for all players in a room (live, from in-memory room)
 app.get('/api/session/:roomCode/timeline', (req, res) => {
   const room = roomManager.getRoom(req.params.roomCode);
   if (!room) return res.status(404).json({ error: 'Room not found' });
   res.json(room.getAllTimelines());
 });
 
-// ── Helpers ──────────────────────────────────────────────────────────────────
+// Per-player study reports â€” served from MongoDB after session ends
+app.get('/api/session/:roomCode/report', async (req, res) => {
+  try {
+    const { Session } = await import('./db/models/Session.js');
+    const session = await Session.findOne({ roomCode: req.params.roomCode })
+      .sort({ createdAt: -1 })
+      .lean();
+    if (!session) return res.status(404).json({ error: 'Session not found' });
+    // Return per-player study reports extracted from the players array
+    const reports = {};
+    for (const p of session.players ?? []) {
+      reports[p.username] = {
+        studyReport: p.studyReport ?? null,
+        conceptQuiz: p.conceptQuiz ?? null,
+      };
+    }
+    res.json(reports);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// â”€â”€ Helpers â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 /** Broadcast the full room state to every player in the room. */
 function broadcastRoomState(room) {
@@ -264,36 +287,122 @@ function startSession(room) {
 }
 
 const QUIZ_ANSWER_WINDOW_MS = 30_000; // players have 30s to answer
+const QUIZ_DEFAULT_INTERVAL_S = 30;   // default seconds between quizzes
 
+/**
+ * Schedule a personalized quiz round for the room.
+ *
+ * quizMode 'frequency' â†’ quizValue is minutes between quizzes (e.g. 5 = every 5 min)
+ * quizMode 'total'     â†’ quizValue is total quiz count for the session
+ *                         interval = sessionDuration / quizValue
+ */
 function scheduleNextQuiz(room) {
-  if (!room.quizBank.length || room.quizIndex >= room.quizBank.length) return;
-
-  const delayMs = (5 + Math.random() * 5) * 60 * 1000; // 5–10 min random interval
-  room.quizTimer = setTimeout(() => {
+  let intervalSec;
+  if (room.quizMode === 'total' && room.quizValue) {
+    // Spread N quizzes evenly across the session duration (minutes â†’ seconds)
+    const sessionSec = (room.duration || 25) * 60;
+    intervalSec = Math.round(sessionSec / room.quizValue);
+  } else {
+    // 'frequency' mode: quizValue is minutes between quizzes
+    intervalSec = (room.quizValue || 5) * 60;
+  }
+  // Solo mode: cap at 60s so quizzes come quickly for demo
+  if (room.mode === 'solo') {
+    intervalSec = Math.min(intervalSec, 60);
+  }
+  // For testing: respect QUIZ_MIN_INTERVAL env override
+  const minInterval = parseInt(process.env.QUIZ_MIN_INTERVAL_S, 10) || 10;
+  intervalSec = Math.max(minInterval, intervalSec);
+  // Add Â±20% jitter so quizzes don't feel robotic
+  const jitter = intervalSec * 0.2 * (Math.random() * 2 - 1);
+  const delayMs = Math.max(10_000, (intervalSec + jitter) * 1000);
+  console.log(`[quiz] Next quiz for room ${room.code} in ${Math.round(delayMs / 1000)}s (interval: ${intervalSec}s, mode: ${room.quizMode}, value: ${room.quizValue})`);
+  room.quizTimer = setTimeout(async () => {
     if (!room.active) return;
 
-    const question = room.quizBank[room.quizIndex++];
-    room.setActiveQuestion(question);
+    const bloomLevel = room.getNextBloomLevel();
+    const roundId = randomUUID();
+    const playerQuestions = new Map(); // socketId -> question
 
-    // Emit to ALL players simultaneously so everyone sees the same question
-    io.to(room.code).emit('surprise-quiz', {
-      question,
-      windowMs: QUIZ_ANSWER_WINDOW_MS,
-    });
-    console.log(`[quiz] surprise-quiz fired in room ${room.code}: "${question.question.slice(0, 60)}..."`);
+    // Try to generate personalized questions for each player with concepts
+    for (const [socketId, player] of room.players) {
+      if (!player.screenConcepts.length) continue;
+      try {
+        const q = await screenAgent.generatePersonalizedQuestion(player.screenConcepts, bloomLevel);
+        if (q) playerQuestions.set(socketId, q);
+      } catch (err) {
+        console.error(`[quiz] Personalized question gen failed for ${player.username}:`, err.message);
+      }
+    }
 
-    // After 30s, close the question and broadcast results regardless of who answered
-    const timeoutId = setTimeout(() => {
-      closeQuestion(room, question.id);
-    }, QUIZ_ANSWER_WINDOW_MS);
-    room.answerTimeouts.set(question.id, timeoutId);
+    if (playerQuestions.size > 0) {
+      // â”€â”€ Personalized round â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+      room.startPersonalizedRound(roundId, playerQuestions, bloomLevel);
 
-    // Schedule the next quiz after this one resolves
+      // Emit personalized question to each player individually (staggered 500ms to spread load)
+      let delay = 0;
+      for (const [socketId, q] of playerQuestions) {
+        setTimeout(() => {
+          console.log(`[quiz] Emitting surprise-quiz to ${socketId}, question: "${q.question?.substring(0, 60)}"`);
+          io.to(socketId).emit('surprise-quiz', {
+            // Attach roundId and personalized flag directly on the question object
+            // so the client QuizOverlay can match quiz-results events by roundId
+            question: { ...q, roundId, personalized: true },
+            windowMs: QUIZ_ANSWER_WINDOW_MS,
+            personalized: true,
+            bloomLevel,
+          });
+        }, delay);
+        delay += 500;
+      }
+
+      console.log(
+        `[quiz] Personalized round ${roundId} fired in room ${room.code} ` +
+        `(${playerQuestions.size} players, bloom: ${bloomLevel})`
+      );
+
+      // Close the round after window expires
+      room.roundAnswerTimeout = setTimeout(() => {
+        closePersonalizedRound(room);
+      }, QUIZ_ANSWER_WINDOW_MS);
+
+    } else if (room.quizBank.length && room.quizIndex < room.quizBank.length) {
+      // â”€â”€ Fallback: PDF quiz bank (shared question for all players) â”€â”€â”€â”€â”€â”€â”€
+      const question = room.quizBank[room.quizIndex++];
+      room.setActiveQuestion(question);
+      io.to(room.code).emit('surprise-quiz', {
+        question,
+        windowMs: QUIZ_ANSWER_WINDOW_MS,
+        personalized: false,
+      });
+      console.log(`[quiz] PDF fallback quiz in room ${room.code}: "${question.question.slice(0, 60)}..."`);
+
+      const timeoutId = setTimeout(() => closeQuestion(room, question.id), QUIZ_ANSWER_WINDOW_MS);
+      room.answerTimeouts.set(question.id, timeoutId);
+    } else {
+      console.log(`[quiz] No concepts and no quiz bank for room ${room.code} â€” skipping round`);
+    }
+
+    // Schedule the next round regardless
     scheduleNextQuiz(room);
   }, delayMs);
 }
 
-/** Broadcast results for a question and clear its tracking state. */
+/** Close a personalized round and broadcast aggregated results. */
+function closePersonalizedRound(room) {
+  if (room.roundAnswerTimeout) {
+    clearTimeout(room.roundAnswerTimeout);
+    room.roundAnswerTimeout = null;
+  }
+  if (!room.currentRoundId) return;
+
+  const results = room.getRoundResults();
+  io.to(room.code).emit('quiz-results', results);
+  console.log(`[quiz] Personalized round ${room.currentRoundId} closed in room ${room.code}`);
+  room.currentRoundId = null;
+}
+
+/** Close a PDF quiz-bank question and broadcast results. */
 function closeQuestion(room, questionId) {
   const timeoutId = room.answerTimeouts.get(questionId);
   if (timeoutId) {
@@ -313,21 +422,8 @@ async function endSession(room) {
   room.endSession();
   const summary = room.getSummary();
   const roomCode = room.code;
-
-  // Snapshot room data synchronously before removal (refs go stale after removeRoom)
-  const allConcepts = [];
-  for (const p of room.players.values()) {
-    for (const c of p.screenConcepts) {
-      if (!allConcepts.includes(c)) allConcepts.push(c);
-    }
-  }
-  const allTimeline = [];
-  for (const p of room.players.values()) {
-    for (const entry of p.screenTimeline) {
-      allTimeline.push({ ...entry, username: p.username });
-    }
-  }
-  allTimeline.sort((a, b) => a.timestamp - b.timestamp);
+  // Keep a stable snapshot of per-player capture data after room removal.
+  const roomPlayersBySocket = new Map(room.players);
 
   const recapText = summary.players
     .map((p) => `${p.username}: ${(p.focusPercent * 100).toFixed(0)}% focus, ${(p.quizAccuracy * 100).toFixed(0)}% quiz accuracy.`)
@@ -339,12 +435,12 @@ async function endSession(room) {
   const roomStakeAmount = room.stakeAmount;
   const allTimelines   = room.getAllTimelines();
 
-  // ── Emit immediately — recap screen appears with zero delay ─────────────────
+  // â”€â”€ Emit immediately â€” recap screen appears with zero delay â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   io.to(roomCode).emit('session_end', summary);
   roomManager.removeRoom(roomCode);
   console.log(`[room:${roomCode}] Session ended`);
 
-  // ── Background group 1: DB writes (XP, leaderboard, session record) ─────────
+  // â”€â”€ Background group 1: DB writes (XP, leaderboard, session record) â”€â”€â”€â”€â”€â”€â”€â”€â”€
   (async () => {
     const { Session }    = await import('./db/models/Session.js');
     const { User }       = await import('./db/models/User.js');
@@ -385,12 +481,28 @@ async function endSession(room) {
         console.error(`[endSession] XP update failed for ${p.userId}:`, err.message);
       }
       return {
-        userId: p.userId, username: p.username,
-        focusPercent: p.focusPercent, quizAccuracy: p.quizAccuracy,
-        quizCorrectCount: p.quizCorrectCount, totalQuizPoints: p.totalQuizPoints,
-        sessionScore: p.sessionScore, xpGained, newLevel,
+        userId: p.userId,
+        username: p.username,
+        focusPercent: p.focusPercent,
+        screenStudyPercent: p.screenStudyPercent,
+        quizAccuracy: p.quizAccuracy,
+        quizCorrectCount: p.quizCorrectCount,
+        questionsTotal: p.questionsTotal,
+        totalQuizPoints: p.totalQuizPoints,
+        responseTimeScore: p.responseTimeScore,
+        consistencyScore: p.consistencyScore,
+        sessionScore: p.sessionScore,
+        xpGained,
+        newLevel,
       };
     }));
+
+    // Push XP/level into recap after initial session_end emit.
+    summary.players = summary.players.map((p) => {
+      const pr = playerResults.find((r) => r.userId === p.userId);
+      return pr ? { ...p, xpGained: pr.xpGained, newLevel: pr.newLevel } : p;
+    });
+    io.to(roomCode).emit('session_recap_update', { players: summary.players });
 
     try {
       await Session.create({
@@ -408,18 +520,18 @@ async function endSession(room) {
     }
   })().catch((err) => console.error('[endSession] DB error:', err.message));
 
-  // ── Background group 2: Solana payout + on-chain reputation minting ─────────
+  // â”€â”€ Background group 2: Solana payout + on-chain reputation minting â”€â”€â”€â”€â”€â”€â”€â”€â”€
   // Only runs for locked-in mode; fires independently so it never delays recap.
   (async () => {
-    if (summary.mode !== 'locked-in' || !summary.stakeAmount) return;
+    if (roomMode !== 'locked-in' || !roomStakeAmount) return;
 
-    // ── Rank-based proportional payout ───────────────────────────────────────
+    // â”€â”€ Rank-based proportional payout â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
     const payoutResult = await executeAtomicPayout({
       players: summary.players.map((p) => ({
         walletAddress:  p.walletAddress,
-        compositeScore: p.sessionScore, // 0–1 composite from room.getSummary()
+        compositeScore: p.sessionScore, // 0â€“1 composite from room.getSummary()
       })),
-      totalStakedLamports: summary.stakeAmount * summary.players.length,
+      totalStakedLamports: roomStakeAmount * summary.players.length,
       serverEscrowKeypair: escrowService.serverKeypair,
     });
 
@@ -432,7 +544,7 @@ async function endSession(room) {
       console.error('[payout] Failed:', payoutResult.error);
     }
 
-    // ── Mint BUDDY_WIN + BUDDY_XP reputation tokens ───────────────────────────
+    // â”€â”€ Mint BUDDY_WIN + BUDDY_XP reputation tokens â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
     const winMintAddr = process.env.BUDDY_WIN_MINT;
     const xpMintAddr  = process.env.BUDDY_XP_MINT;
     if (winMintAddr && xpMintAddr) {
@@ -455,33 +567,48 @@ async function endSession(room) {
     }
   })().catch((err) => console.error('[solana] Background Solana error:', err.message));
 
-  // ── Background group 3: AI + audio (all three in parallel) ─────────────────
+  // â”€â”€ Background group 3: per-player AI reports + recap audio â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   (async () => {
-    const [conceptResult, reportResult, audioResult] = await Promise.allSettled([
-      allConcepts.length > 0
-        ? screenAgent.generateConceptQuiz(allConcepts)
-        : Promise.resolve(null),
-      allTimeline.length > 0
-        ? screenAgent.generateStudyReport(allTimeline)
-        : Promise.resolve(null),
-      voiceService.generateRecapAudio(recapText, roomCode),
+    const playersPromise =
+      Promise.all(summary.players.map(async (sp) => {
+        const rp = roomPlayersBySocket.get(sp.socketId);
+        const out = { ...sp, conceptQuiz: null, studyReport: null };
+        if (!rp) return out;
+
+        const [conceptResult, reportResult] = await Promise.allSettled([
+          rp.screenConcepts?.length
+            ? screenAgent.generateConceptQuiz(rp.screenConcepts)
+            : Promise.resolve(null),
+          rp.screenTimeline?.length
+            ? screenAgent.generateStudyReport(rp.screenTimeline)
+            : Promise.resolve(null),
+        ]);
+
+        if (conceptResult.status === 'fulfilled' && conceptResult.value) {
+          out.conceptQuiz = conceptResult.value;
+          console.log(`[screen] ${out.conceptQuiz.length} concept quiz questions for ${sp.username}`);
+        } else if (conceptResult.status === 'rejected') {
+          console.error(`[screen] Concept quiz failed for ${sp.username}:`, conceptResult.reason?.message);
+        }
+
+        if (reportResult.status === 'fulfilled' && reportResult.value) {
+          out.studyReport = reportResult.value;
+          console.log(`[screen] Study report generated for ${sp.username}`);
+        } else if (reportResult.status === 'rejected') {
+          console.error(`[screen] Study report failed for ${sp.username}:`, reportResult.reason?.message);
+        }
+
+        return out;
+      }));
+    const audioPromise = voiceService.generateRecapAudio(recapText, roomCode);
+    const [playersWithReports, audioSettled] = await Promise.all([
+      playersPromise,
+      Promise.allSettled([audioPromise]),
     ]);
 
-    const update = {};
-
-    if (conceptResult.status === 'fulfilled' && conceptResult.value) {
-      update.conceptQuiz = conceptResult.value;
-      console.log(`[screen] Generated ${update.conceptQuiz.length} concept quiz questions from ${allConcepts.length} concepts`);
-    } else if (conceptResult.status === 'rejected') {
-      console.error('[screen] Concept quiz generation failed:', conceptResult.reason?.message);
-    }
-
-    if (reportResult.status === 'fulfilled' && reportResult.value) {
-      update.studyReport = reportResult.value;
-      console.log('[screen] Study report generated');
-    } else if (reportResult.status === 'rejected') {
-      console.error('[screen] Study report generation failed:', reportResult.reason?.message);
-    }
+    summary.players = playersWithReports;
+    const update = { players: playersWithReports };
+    const audioResult = audioSettled[0];
 
     if (audioResult.status === 'fulfilled' && audioResult.value) {
       update.recapAudioUrl = audioResult.value;
@@ -495,12 +622,12 @@ async function endSession(room) {
   })().catch((err) => console.error('[endSession] AI/audio error:', err.message));
 }
 
-// ── Socket.io ────────────────────────────────────────────────────────────────
+// â”€â”€ Socket.io â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 io.on('connection', (socket) => {
   console.log('[socket] connected:', socket.id);
 
-  // ── create_room ──────────────────────────────────────────────────────────
+  // â”€â”€ create_room â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   socket.on('create_room', ({ userId, username, mode, stakeAmount }) => {
     const room = roomManager.createRoom(socket.id, userId, username, mode, stakeAmount);
     socket.join(room.code);
@@ -509,7 +636,7 @@ io.on('connection', (socket) => {
     console.log(`[room:${room.code}] Created by ${username} (${mode})`);
   });
 
-  // ── join_room ────────────────────────────────────────────────────────────
+  // â”€â”€ join_room â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   socket.on('join_room', ({ roomCode, userId, username }) => {
     const room = roomManager.joinRoom(roomCode, socket.id, userId, username);
     if (!room) {
@@ -522,7 +649,7 @@ io.on('connection', (socket) => {
     console.log(`[room:${roomCode}] ${username} joined (${room.players.size}/${room.getState().maxPlayers})`);
   });
 
-  // ── player_ready ─────────────────────────────────────────────────────────
+  // â”€â”€ player_ready â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   socket.on('player_ready', ({ roomCode }) => {
     const room = roomManager.getRoom(roomCode);
     if (!room || room.status !== 'waiting') return;
@@ -531,7 +658,7 @@ io.on('connection', (socket) => {
     broadcastRoomState(room); // everyone sees the updated ready state
   });
 
-  // ── player_unready ───────────────────────────────────────────────────────
+  // â”€â”€ player_unready â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   socket.on('player_unready', ({ roomCode }) => {
     const room = roomManager.getRoom(roomCode);
     if (!room || room.status !== 'waiting') return;
@@ -539,7 +666,7 @@ io.on('connection', (socket) => {
     broadcastRoomState(room);
   });
 
-  // ── select_buddy ─────────────────────────────────────────────────────────
+  // â”€â”€ select_buddy â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   socket.on('select_buddy', ({ roomCode, buddy }) => {
     const room = roomManager.getRoom(roomCode);
     if (!room) return;
@@ -548,7 +675,7 @@ io.on('connection', (socket) => {
     broadcastRoomState(room); // keeps store.room.buddySelections in sync
   });
 
-  // ── update_settings (host only) ──────────────────────────────────────────
+  // â”€â”€ update_settings (host only) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   socket.on('update_settings', ({ roomCode, duration, quizMode, quizValue }) => {
     const room = roomManager.getRoom(roomCode);
     if (!room || room.status !== 'waiting') return;
@@ -556,9 +683,10 @@ io.on('connection', (socket) => {
     if (!player?.isHost) return;
     room.updateSettings(duration, quizMode, quizValue);
     io.to(roomCode).emit('settings_updated', { duration, quizMode, quizValue });
+    broadcastRoomState(room);
   });
 
-  // ── update_mode (host only) ──────────────────────────────────────────────
+  // â”€â”€ update_mode (host only) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   socket.on('update_mode', ({ roomCode, mode, stakeAmount }) => {
     const room = roomManager.getRoom(roomCode);
     if (!room || room.status !== 'waiting') return;
@@ -569,18 +697,19 @@ io.on('connection', (socket) => {
     broadcastRoomState(room);
   });
 
-  // ── start_session (host explicit) ────────────────────────────────────────
+  // â”€â”€ start_session (host explicit) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   socket.on('start_session', ({ roomCode }) => {
     const room = roomManager.getRoom(roomCode);
     if (!room || room.status !== 'waiting') return;
     const player = room.players.get(socket.id);
     if (!player?.isHost) return;
     if (!room.allReady()) return;
+    // Solo rooms skip escrow check entirely
     if (room.mode === 'locked-in' && !room.allEscrowConfirmed()) return;
     startSession(room);
   });
 
-  // ── focus_update ─────────────────────────────────────────────────────────
+  // â”€â”€ focus_update â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   // Client emits: { roomCode, focused: boolean }
   // Server broadcasts to all OTHER players: { playerId, focused, players[] }
   // players[] includes live focus_percentage for every player so clients can
@@ -598,7 +727,7 @@ io.on('connection', (socket) => {
     const focusData = room.getLiveFocusData(now);
 
     // Broadcast to all OTHER players in the room.
-    // (The sender already knows their own focused state — they sent it.)
+    // (The sender already knows their own focused state â€” they sent it.)
     socket.to(roomCode).emit('focus_update', {
       playerId: socket.id,
       focused,
@@ -606,7 +735,7 @@ io.on('connection', (socket) => {
     });
   });
 
-  // ── screen-capture ───────────────────────────────────────────────────────
+  // â”€â”€ screen-capture â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   // Client emits: { roomCode, image: base64string, mimeType? }
   // Server analyzes via Gemini Vision, stores result, detects fake focus
   socket.on('screen-capture', async ({ roomCode, image, mimeType }) => {
@@ -620,8 +749,16 @@ io.on('connection', (socket) => {
       const analysis = await screenAgent.analyzeScreen(image, mimeType || 'image/png');
       room.recordScreenAnalysis(socket.id, analysis);
 
-      // Send analysis back to the capturing player
+      // Send full analysis back to the capturing player
       socket.emit('screen-analysis', analysis);
+
+      // Broadcast subject update to all room members so everyone can see each other's subject
+      io.to(roomCode).emit('subject_update', {
+        socketId: socket.id,
+        subject: analysis.subject,
+        is_studying: analysis.is_studying,
+        distraction: analysis.distraction,
+      });
 
       // Fake-focus detection: MediaPipe says focused but screen says not studying
       if (player.focused && !analysis.is_studying) {
@@ -646,35 +783,49 @@ io.on('connection', (socket) => {
     }
   });
 
-  // ── quiz_answer ──────────────────────────────────────────────────────────
+  // â”€â”€ quiz_answer â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   // Client emits: { roomCode, questionId, answerIndex: 0-3, timeMs }
-  // Server:
-  //   1. Records answer and scores it
-  //   2. Sends a private ack back to the answering player
-  //   3. If all players have answered → closes question immediately and
-  //      broadcasts quiz-results to everyone
+  // Routes to personalized-round handler or PDF quiz-bank handler based on
+  // which map the questionId is found in.
   socket.on('quiz_answer', ({ roomCode, questionId, answerIndex, timeMs }) => {
     const room = roomManager.getRoom(roomCode);
     if (!room || !room.active) return;
 
-    const result = room.recordAnswer(socket.id, questionId, answerIndex, timeMs);
-    if (!result) return; // duplicate answer or unknown question — ignore
+    if (room.personalizedQuestions.has(questionId)) {
+      // â”€â”€ Personalized round answer â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+      const result = room.recordPersonalizedAnswer(socket.id, questionId, answerIndex, timeMs);
+      if (!result) return;
 
-    // Private ack: tell this player whether they were right
-    socket.emit('quiz-answer-ack', {
-      questionId,
-      correct: result.correct,
-      points: result.points,
-      correctAnswerIndex: result.correctAnswerIndex,
-    });
+      socket.emit('quiz-answer-ack', {
+        questionId,
+        correct: result.correct,
+        points: result.points,
+        correctAnswerIndex: result.correctAnswerIndex,
+      });
 
-    // If all players answered early, resolve immediately (don't wait for timeout)
-    if (room.allPlayersAnswered(questionId)) {
-      closeQuestion(room, questionId);
+      // If all players in this round answered early, close immediately
+      if (room.allRoundAnswered()) {
+        closePersonalizedRound(room);
+      }
+    } else {
+      // â”€â”€ PDF quiz-bank answer â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+      const result = room.recordAnswer(socket.id, questionId, answerIndex, timeMs);
+      if (!result) return;
+
+      socket.emit('quiz-answer-ack', {
+        questionId,
+        correct: result.correct,
+        points: result.points,
+        correctAnswerIndex: result.correctAnswerIndex,
+      });
+
+      if (room.allPlayersAnswered(questionId)) {
+        closeQuestion(room, questionId);
+      }
     }
   });
 
-  // ── wallet_connected ─────────────────────────────────────────────────────
+  // â”€â”€ wallet_connected â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   socket.on('wallet_connected', ({ roomCode, walletAddress }) => {
     const room = roomManager.getRoom(roomCode);
     if (!room) return;
@@ -682,7 +833,7 @@ io.on('connection', (socket) => {
     broadcastRoomState(room);
   });
 
-  // ── escrow_confirmed ─────────────────────────────────────────────────────
+  // â”€â”€ escrow_confirmed â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   socket.on('escrow_confirmed', async ({ roomCode, txSignature, walletAddress }) => {
     const room = roomManager.getRoom(roomCode);
     if (!room) return;
@@ -697,19 +848,38 @@ io.on('connection', (socket) => {
 
     if (room.allEscrowConfirmed()) {
       io.to(roomCode).emit('escrow_ready');
-      // Auto-start if everyone is also marked ready
-      if (shouldStartSession(room)) startSession(room);
+      // Host must still click START SESSION â€” no auto-start
     }
   });
 
-  // ── end_session ──────────────────────────────────────────────────────────
+  // â”€â”€ close_room (host only) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+  socket.on('close_room', ({ roomCode }) => {
+    const room = roomManager.getRoom(roomCode);
+    if (!room) return;
+    const player = room.players.get(socket.id);
+    if (!player?.isHost) return;
+
+    // Notify everyone in the room
+    io.to(roomCode).emit('room_closed', { reason: 'Host closed the room' });
+
+    // Remove all players from the socket room and clean up
+    for (const [sid] of room.players) {
+      const s = io.sockets.sockets.get(sid);
+      if (s) s.leave(roomCode);
+      roomManager.playerRooms.delete(sid);
+    }
+    roomManager.removeRoom(roomCode);
+    console.log(`[room] Room ${roomCode} closed by host ${player.username}`);
+  });
+
+  // â”€â”€ end_session â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   socket.on('end_session', ({ roomCode }) => {
     const room = roomManager.getRoom(roomCode);
     if (!room || !room.active) return;
     endSession(room);
   });
 
-  // ── disconnect ───────────────────────────────────────────────────────────
+  // â”€â”€ disconnect â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   socket.on('disconnect', () => {
     const room = roomManager.removePlayer(socket.id);
 
@@ -734,14 +904,15 @@ io.on('connection', (socket) => {
   });
 });
 
-// ── Boot ─────────────────────────────────────────────────────────────────────
+// â”€â”€ Boot â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 const PORT = process.env.PORT || 3001;
 connectDB().then(() => {
   httpServer.listen(PORT, () => {
-    console.log(`Buddy Lock-In server → http://localhost:${PORT}`);
+    console.log(`Buddy Lock-In server â†’ http://localhost:${PORT}`);
     voiceService.preGenerateNarratorLines().catch((err) =>
       console.error('[voice] Startup narrator generation failed:', err.message)
     );
   });
 });
+
