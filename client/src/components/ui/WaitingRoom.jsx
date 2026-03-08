@@ -190,7 +190,7 @@ const s = {
 };
 
 export function WaitingRoom() {
-  const { room, user } = useGameStore();
+  const { room, user, setPhase } = useGameStore();
   const { walletAddress, isPhantomInstalled, connect, approveEscrow } = usePhantomWallet();
   const fileRef = useRef();
   const [uploading, setUploading] = useState(false);
@@ -332,6 +332,11 @@ export function WaitingRoom() {
       setQuizValue(data.quizValue);
     });
     return () => socket.off('settings_updated');
+  }, []);
+
+  useEffect(() => {
+    socket.on('session_started', () => setPhase('session'));
+    return () => socket.off('session_started');
   }, []);
 
   if (!room) return null;
@@ -651,9 +656,85 @@ export function WaitingRoom() {
 
         {error && <div style={s.error}>{error}</div>}
 
-        <button style={s.btn(!canReady || ready)} onClick={handleReady} disabled={!canReady || ready}>
-          {ready ? 'Waiting for partner...' : 'Ready'}
-        </button>
+        {/* Bottom action button */}
+        {isHost ? (() => {
+          const enoughPlayers = room.players.length >= 2;
+          const allReady = enoughPlayers && room.players.every((p) => p.ready);
+          const canStart = enoughPlayers && allReady;
+          const statusText = !enoughPlayers
+            ? 'NEED AT LEAST 2 PLAYERS'
+            : !allReady
+            ? 'WAITING FOR ALL PLAYERS TO READY UP'
+            : 'ALL PLAYERS READY!';
+          const statusColor = allReady ? '#68B868' : '#444466';
+          return (
+            <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 8 }}>
+              <button
+                disabled={!canStart}
+                onClick={() => socket.emit('start_session', { roomCode: room.code })}
+                style={{
+                  fontFamily: "'Press Start 2P', monospace",
+                  fontSize: 10,
+                  padding: '12px 24px',
+                  background: canStart ? '#F8D030' : '#1a1a2e',
+                  color: canStart ? '#0A0A2E' : '#555',
+                  border: 'none',
+                  borderRadius: 4,
+                  cursor: canStart ? 'pointer' : 'not-allowed',
+                  opacity: canStart ? 1 : 0.4,
+                  letterSpacing: 1,
+                  boxShadow: canStart
+                    ? '0 4px 0 #B8860B, 0 0 12px rgba(248,208,48,0.4)'
+                    : 'none',
+                  textShadow: canStart ? '0 1px 0 rgba(0,0,0,0.3)' : 'none',
+                  width: '100%',
+                }}
+              >
+                START SESSION
+              </button>
+              <span style={{ fontFamily: "'Press Start 2P', monospace", fontSize: 6, color: statusColor }}>
+                {statusText}
+              </span>
+            </div>
+          );
+        })() : (
+          <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 8 }}>
+            <button
+              onClick={() => {
+                if (ready) {
+                  socket.emit('player_unready', { roomCode: room.code });
+                  setReady(false);
+                } else {
+                  socket.emit('player_ready', { roomCode: room.code });
+                  setReady(true);
+                }
+              }}
+              style={{
+                fontFamily: "'Press Start 2P', monospace",
+                fontSize: 10,
+                padding: '12px 24px',
+                background: ready ? '#E85050' : '#68B868',
+                color: '#fff',
+                border: 'none',
+                borderRadius: 4,
+                cursor: 'pointer',
+                letterSpacing: 1,
+                boxShadow: ready
+                  ? '0 4px 0 #8B2020, 0 0 12px rgba(232,80,80,0.3)'
+                  : '0 4px 0 #3d7a3d, 0 0 12px rgba(104,184,104,0.3)',
+                textShadow: '0 2px 4px rgba(0,0,0,0.4)',
+                width: '100%',
+              }}
+            >
+              {ready ? 'UNREADY' : 'READY UP'}
+            </button>
+            {ready && (
+              <span style={{ fontFamily: "'Press Start 2P', monospace", fontSize: 6, color: '#444466' }}>
+                WAITING FOR HOST TO START...
+              </span>
+            )}
+          </div>
+        )}
       </div>
     </div>
   );
