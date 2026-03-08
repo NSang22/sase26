@@ -222,5 +222,4 @@ Only one ElevenLabs voice ID is needed (`ELEVENLABS_VOICE_ID` in `.env`).
 | Two-laptop demo failure | Support same-machine demo: two browser tabs, one with webcam, one simulated. |
 | MongoDB connection issues | Pre-seed data locally. Have a local fallback or show screenshots of leaderboard if Atlas is down. |
 
-### Built by Abhay, Nikhil, Kushagra 
-
+## Built by Nikhil, Abhay, and Kushagra
