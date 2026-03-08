@@ -199,6 +199,9 @@ export function WaitingRoom() {
   const [error, setError] = useState('');
   const [selectedBuddy, setSelectedBuddy] = useState(null);
   const [takenBuddies, setTakenBuddies] = useState({});
+  const [duration, setDuration] = useState(25);
+  const [quizMode, setQuizMode] = useState('frequency');
+  const [quizValue, setQuizValue] = useState(5);
 
   // Canvas background
   const canvasRef = useRef(null);
@@ -320,6 +323,15 @@ export function WaitingRoom() {
   useEffect(() => {
     socket.on('buddy_update', (data) => setTakenBuddies(data));
     return () => socket.off('buddy_update');
+  }, []);
+
+  useEffect(() => {
+    socket.on('settings_updated', (data) => {
+      setDuration(data.duration);
+      setQuizMode(data.quizMode);
+      setQuizValue(data.quizValue);
+    });
+    return () => socket.off('settings_updated');
   }, []);
 
   if (!room) return null;
@@ -472,6 +484,127 @@ export function WaitingRoom() {
             );
           })}
         </div>
+
+        {/* Session settings */}
+        {isHost ? (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+            <div style={{ ...s.label, color: '#F8D030' }}>SESSION SETTINGS</div>
+
+            {/* Duration */}
+            <div style={s.label}>SESSION DURATION</div>
+            <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+              {[15, 25, 45, 60].map((mins) => {
+                const active = duration === mins;
+                return (
+                  <button
+                    key={mins}
+                    onClick={() => {
+                      setDuration(mins);
+                      socket.emit('update_settings', { roomCode: room.code, duration: mins, quizMode, quizValue });
+                    }}
+                    style={{
+                      fontFamily: "'Press Start 2P', monospace",
+                      fontSize: 7,
+                      padding: '6px 12px',
+                      borderRadius: 4,
+                      border: active ? '2px solid #F8D030' : '2px solid rgba(255,255,255,0.1)',
+                      background: active ? '#F8D030' : 'rgba(0,0,0,0.3)',
+                      color: active ? '#0A0A2E' : '#8888AA',
+                      cursor: 'pointer',
+                      boxShadow: active ? '0 0 8px rgba(248,208,48,0.4)' : 'none',
+                      transition: 'all 0.15s',
+                    }}
+                  >
+                    {mins === 60 ? '1hr' : `${mins}m`}
+                  </button>
+                );
+              })}
+            </div>
+
+            {/* Quiz mode toggle */}
+            <div style={s.label}>QUIZ MODE</div>
+            <div style={{ display: 'flex', gap: 6 }}>
+              {['frequency', 'total'].map((mode) => {
+                const active = quizMode === mode;
+                return (
+                  <button
+                    key={mode}
+                    onClick={() => {
+                      setQuizMode(mode);
+                      socket.emit('update_settings', { roomCode: room.code, duration, quizMode: mode, quizValue });
+                    }}
+                    style={{
+                      fontFamily: "'Press Start 2P', monospace",
+                      fontSize: 7,
+                      padding: '6px 12px',
+                      borderRadius: 4,
+                      border: active ? '2px solid #F8D030' : '2px solid rgba(255,255,255,0.1)',
+                      background: active ? '#F8D030' : 'rgba(0,0,0,0.3)',
+                      color: active ? '#0A0A2E' : '#8888AA',
+                      cursor: 'pointer',
+                      boxShadow: active ? '0 0 8px rgba(248,208,48,0.4)' : 'none',
+                      transition: 'all 0.15s',
+                    }}
+                  >
+                    {mode === 'frequency' ? 'FREQUENCY' : 'TOTAL'}
+                  </button>
+                );
+              })}
+            </div>
+
+            {/* Quiz value options */}
+            <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+              {(quizMode === 'frequency' ? [3, 5, 7, 10] : [3, 5, 8, 10, 15]).map((v) => {
+                const active = quizValue === v;
+                return (
+                  <button
+                    key={v}
+                    onClick={() => {
+                      setQuizValue(v);
+                      socket.emit('update_settings', { roomCode: room.code, duration, quizMode, quizValue: v });
+                    }}
+                    style={{
+                      fontFamily: "'Press Start 2P', monospace",
+                      fontSize: 7,
+                      padding: '6px 12px',
+                      borderRadius: 4,
+                      border: active ? '2px solid #F8D030' : '2px solid rgba(255,255,255,0.1)',
+                      background: active ? '#F8D030' : 'rgba(0,0,0,0.3)',
+                      color: active ? '#0A0A2E' : '#8888AA',
+                      cursor: 'pointer',
+                      boxShadow: active ? '0 0 8px rgba(248,208,48,0.4)' : 'none',
+                      transition: 'all 0.15s',
+                    }}
+                  >
+                    {quizMode === 'frequency' ? `${v}min` : `${v}`}
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+        ) : (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+            <div style={{ ...s.label, color: '#F8D030' }}>SESSION SETTINGS</div>
+            <div style={{
+              backgroundColor: 'rgba(0,0,0,0.3)',
+              borderRadius: 6,
+              padding: '8px 12px',
+              display: 'flex',
+              flexDirection: 'column',
+              gap: 6,
+            }}>
+              <span style={{ fontFamily: "'Press Start 2P', monospace", fontSize: 7, color: '#8888BB' }}>
+                Duration: <span style={{ color: '#CCC' }}>{duration} min</span>
+              </span>
+              <span style={{ fontFamily: "'Press Start 2P', monospace", fontSize: 7, color: '#8888BB' }}>
+                Quizzes:{' '}
+                <span style={{ color: '#CCC' }}>
+                  {quizMode === 'frequency' ? `Every ${quizValue} min` : `${quizValue} total`}
+                </span>
+              </span>
+            </div>
+          </div>
+        )}
 
         {/* Study material upload (host only) */}
         {isHost && (

@@ -22,6 +22,7 @@ export default function BuddyLockIn() {
   const [transitionPhase, setTransitionPhase] = useState("idle"); // idle | closing | pokeball | opening
   const [username, setUsername] = useState("");
   const [copied, setCopied] = useState(false);
+  const [showUsernameError, setShowUsernameError] = useState(false);
   const { setPhase, setRoom, setUser } = useGameStore();
 
   // Generate room code
@@ -587,7 +588,7 @@ export default function BuddyLockIn() {
               type="text"
               placeholder="YOUR NAME"
               value={username}
-              onChange={(e) => setUsername(e.target.value.toUpperCase())}
+              onChange={(e) => { setUsername(e.target.value.toUpperCase()); setShowUsernameError(false); }}
               maxLength={12}
               style={{
                 fontFamily: "'Press Start 2P', monospace",
@@ -603,6 +604,17 @@ export default function BuddyLockIn() {
                 letterSpacing: 2,
               }}
             />
+            {showUsernameError && !username.trim() && (
+              <p style={{
+                fontFamily: "'Press Start 2P', monospace",
+                fontSize: 7,
+                color: "#E85050",
+                margin: 0,
+                textShadow: "0 0 8px rgba(232,80,80,0.4)",
+              }}>
+                ENTER YOUR NAME!
+              </p>
+            )}
 
             {/* Players in room */}
             <div style={{ marginTop: 4, width: "100%" }}>
@@ -676,10 +688,15 @@ export default function BuddyLockIn() {
               </PixelButton>
               <PixelButton
                 id="start"
-                onClick={handleEnterWaitingRoomAsHost}
+                onClick={() => {
+                  if (!username.trim()) { setShowUsernameError(true); return; }
+                  setShowUsernameError(false);
+                  handleEnterWaitingRoomAsHost();
+                }}
                 color="#68B868"
                 hoverColor="#78C878"
                 glowColor="#68B868"
+                style={{ opacity: username.trim() ? 1 : 0.4, cursor: username.trim() ? "pointer" : "not-allowed" }}
               >
                 ENTER WAITING ROOM
               </PixelButton>
@@ -745,7 +762,7 @@ export default function BuddyLockIn() {
               type="text"
               placeholder="YOUR NAME"
               value={username}
-              onChange={(e) => setUsername(e.target.value.toUpperCase())}
+              onChange={(e) => { setUsername(e.target.value.toUpperCase()); setShowUsernameError(false); }}
               maxLength={12}
               style={{
                 fontFamily: "'Press Start 2P', monospace",
@@ -761,6 +778,17 @@ export default function BuddyLockIn() {
                 letterSpacing: 2,
               }}
             />
+            {showUsernameError && !username.trim() && (
+              <p style={{
+                fontFamily: "'Press Start 2P', monospace",
+                fontSize: 7,
+                color: "#E85050",
+                margin: 0,
+                textShadow: "0 0 8px rgba(232,80,80,0.4)",
+              }}>
+                ENTER YOUR NAME!
+              </p>
+            )}
 
             {/* Action buttons */}
             <div style={{ display: "flex", gap: 16, marginTop: 4 }}>
@@ -776,12 +804,14 @@ export default function BuddyLockIn() {
               <PixelButton
                 id="joinGo"
                 onClick={() => {
+                  if (!username.trim()) { setShowUsernameError(true); return; }
+                  setShowUsernameError(false);
                   if (joinCode.length === 6) handleEnterWaitingRoomAsGuest();
                 }}
                 color="#58A8E8"
                 hoverColor="#68B8F8"
                 glowColor="#58A8E8"
-                style={{ opacity: joinCode.length === 6 ? 1 : 0.4 }}
+                style={{ opacity: username.trim() && joinCode.length === 6 ? 1 : 0.4, cursor: username.trim() && joinCode.length === 6 ? "pointer" : "not-allowed" }}
               >
                 ENTER WAITING ROOM
               </PixelButton>
