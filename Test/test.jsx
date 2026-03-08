@@ -3,6 +3,43 @@ import { Canvas, useFrame } from '@react-three/fiber'
 import { useGLTF, OrbitControls, ContactShadows } from '@react-three/drei'
 import * as THREE from 'three'
 
+// Scene object controls: edit these values to move/rotate/resize desk and laptop.
+const TABLE_TRANSFORM = {
+  position: [0, 0, 0],
+  rotation: [0, 0, 0],
+  scale: 1.18,
+}
+
+const LAPTOP_TRANSFORM = {
+  position: [0.5, 0.15, 0],
+  rotation: [0, -5, 0],
+  scale: 2,
+}
+
+function Table({ transform = TABLE_TRANSFORM }) {
+  const { scene } = useGLTF('/models/Table.glb')
+  return (
+    <primitive
+      object={scene}
+      position={transform.position}
+      rotation={transform.rotation}
+      scale={transform.scale}
+    />
+  )
+}
+
+function Laptop({ transform = LAPTOP_TRANSFORM }) {
+  const { scene } = useGLTF('/models/Laptop.glb')
+  return (
+    <primitive
+      object={scene.clone()}
+      position={transform.position}
+      rotation={transform.rotation}
+      scale={transform.scale}
+    />
+  )
+}
+
 // --- MODULAR PARTICLE COMPONENTS ---
 
 function EnergyParticles() {
@@ -226,9 +263,42 @@ const animationModules = {
   },
 }
 
+// Per-Pokemon placement/scaling controls.
+// Edit these values to fine-tune each model quickly.
+const DEFAULT_POKEMON_TRANSFORM = {
+  scenePosition: [-0.58, 0.88, 0.04],
+  sceneRotation: [0, -Math.PI / 2.35, 0],
+  modelScale: 1.5,
+}
+
+const POKEMON_TRANSFORMS = {
+  '/models/pikachu/pikachu.glb': {
+    ...DEFAULT_POKEMON_TRANSFORM,
+    scenePosition: [0, 0.88, 0.04],
+    sceneRotation: [0, -Math.PI / 2.35, 0],
+    modelScale: 1,
+  },
+  '/models/bulbasaur/bulbasaur.glb': {
+    ...DEFAULT_POKEMON_TRANSFORM,
+  },
+  '/models/charmander/charmander.glb': {
+    ...DEFAULT_POKEMON_TRANSFORM,
+  },
+  '/models/squirtle/squirtle.glb': {
+    ...DEFAULT_POKEMON_TRANSFORM,
+    modelScale: 2.7,
+  },
+  '/models/eevee.glb': {
+    ...DEFAULT_POKEMON_TRANSFORM,
+  },
+  '/models/jigglypuff/jigglypuff.glb': {
+    ...DEFAULT_POKEMON_TRANSFORM,
+  },
+}
+
 // --- MAIN PIKACHU COMPONENT ---
 
-function Pet({ url, animationType }) {
+function Pet({ url, animationType, modelScale }) {
   const { scene } = useGLTF(url)
   const group = useRef()
   const startTimeRef = useRef(0)
@@ -634,7 +704,9 @@ function Pet({ url, animationType }) {
     // Reset base transformations
     group.current.position.set(0, 0, 0)
     group.current.rotation.set(0, 0, 0)
-    const baseScale = isSquirtle ? 2.7 : 1.5
+    // Fallback preserves old behavior if a transform entry is missing.
+    const fallbackScale = isSquirtle ? 2.7 : 1.5
+    const baseScale = modelScale ?? fallbackScale
     group.current.scale.set(baseScale, baseScale, baseScale)
 
     const module = animationModules[animationType]
@@ -906,6 +978,12 @@ export default function App() {
     { label: 'JigglyPuff', path: '/models/jigglypuff/JigglyPuff.glb' },
   ]
 
+  const selectedKey = selectedPokemon.toLowerCase()
+  const selectedTransform = {
+    ...DEFAULT_POKEMON_TRANSFORM,
+    ...(POKEMON_TRANSFORMS[selectedKey] || {}),
+  }
+
   return (
     <div style={{ width: '100vw', height: '100vh', background: '#111', position: 'relative' }}>
       <div style={{ position: 'absolute', top: 20, width: '100%', display: 'flex', justifyContent: 'center', gap: '10px', zIndex: 10, flexWrap: 'wrap' }}>
@@ -924,16 +1002,26 @@ export default function App() {
         <button onClick={() => setActiveAnim(null)} style={{ background: '#333', color: '#fff' }}>Reset</button>
       </div>
 
-      <Canvas camera={{ position: [0, 2, 10], fov: 45 }}>
+      <Canvas camera={{ position: [0, 2.2, 8.4], fov: 42 }}>
         <color attach="background" args={['#111']} />
         <Suspense fallback={null}>
           <ambientLight intensity={1.2} />
           <pointLight position={[10, 10, 10]} intensity={1} />
-          
-          <Pet key={selectedPokemon} url={selectedPokemon} animationType={activeAnim} />
 
-          <ContactShadows position={[0, -0.1, 0]} opacity={0.5} scale={10} blur={2.5} />
-          <OrbitControls makeDefault />
+          <Table transform={TABLE_TRANSFORM} />
+          <Laptop transform={LAPTOP_TRANSFORM} />
+
+          <group position={selectedTransform.scenePosition} rotation={selectedTransform.sceneRotation}>
+            <Pet
+              key={selectedPokemon}
+              url={selectedPokemon}
+              animationType={activeAnim}
+              modelScale={selectedTransform.modelScale}
+            />
+          </group>
+
+          <ContactShadows position={[0, -0.58, 0]} opacity={0.5} scale={10} blur={2.5} />
+          <OrbitControls makeDefault target={[0, 0.86, 0]} minPolarAngle={0.45} maxPolarAngle={Math.PI / 2.03} />
         </Suspense>
       </Canvas>
     </div>
