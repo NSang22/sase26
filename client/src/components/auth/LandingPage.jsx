@@ -214,8 +214,6 @@ export default function BuddyLockIn() {
   const [joinCode, setJoinCode] = useState("");
   const [hoveredBtn, setHoveredBtn] = useState(null);
   const [transitionPhase, setTransitionPhase] = useState("idle"); // idle | closing | pokeball | opening
-  const [selectedPokemon, setSelectedPokemon] = useState(null);
-  const [players, setPlayers] = useState([]);
   const [username, setUsername] = useState("");
   const [copied, setCopied] = useState(false);
 
@@ -433,65 +431,6 @@ export default function BuddyLockIn() {
     const b = Math.max(0, (num & 255) - 40);
     return `#${((r << 16) | (g << 8) | b).toString(16).padStart(6, "0")}`;
   }
-
-  // Pokemon selection card
-  const PokemonCard = ({ type, selected, onClick }) => {
-    const p = POKEMON_SPRITES[type];
-    const isSelected = selected === type;
-    const cardRef = useRef(null);
-    const miniCanvasRef = useRef(null);
-
-    useEffect(() => {
-      const canvas = miniCanvasRef.current;
-      if (!canvas) return;
-      const ctx = canvas.getContext("2d");
-      let frame = 0;
-      let animId;
-
-      const draw = () => {
-        ctx.clearRect(0, 0, 64, 64);
-        drawPixelPokemon(ctx, 10, 14, type, frame++, 2);
-        animId = requestAnimationFrame(draw);
-      };
-      draw();
-      return () => cancelAnimationFrame(animId);
-    }, [type]);
-
-    return (
-      <div
-        onClick={onClick}
-        ref={cardRef}
-        style={{
-          width: 72,
-          textAlign: "center",
-          cursor: "pointer",
-          padding: "6px 4px",
-          borderRadius: 8,
-          border: isSelected ? `2px solid ${p.color}` : "2px solid rgba(255,255,255,0.1)",
-          backgroundColor: isSelected ? `${p.color}22` : "rgba(255,255,255,0.03)",
-          boxShadow: isSelected ? `0 0 15px ${p.color}44` : "none",
-          transition: "all 0.2s",
-        }}
-      >
-        <canvas
-          ref={miniCanvasRef}
-          width={64}
-          height={64}
-          style={{ width: 64, height: 64, imageRendering: "pixelated" }}
-        />
-        <div
-          style={{
-            fontFamily: "'Press Start 2P', monospace",
-            fontSize: 7,
-            color: isSelected ? p.color : "#8888AA",
-            marginTop: 4,
-          }}
-        >
-          {p.name}
-        </div>
-      </div>
-    );
-  };
 
   return (
     <div
@@ -818,28 +757,6 @@ export default function BuddyLockIn() {
               }}
             />
 
-            {/* Pokemon Selection */}
-            <p
-              style={{
-                fontFamily: "'Press Start 2P', monospace",
-                fontSize: 8,
-                color: "#E85050",
-                margin: "2px 0 0 0",
-              }}
-            >
-              CHOOSE YOUR BUDDY
-            </p>
-            <div style={{ display: "flex", gap: 6, flexWrap: "wrap", justifyContent: "center" }}>
-              {Object.keys(POKEMON_SPRITES).map((type) => (
-                <PokemonCard
-                  key={type}
-                  type={type}
-                  selected={selectedPokemon}
-                  onClick={() => setSelectedPokemon(type)}
-                />
-              ))}
-            </div>
-
             {/* Players in room */}
             <div style={{ marginTop: 4, width: "100%" }}>
               <p
@@ -883,7 +800,7 @@ export default function BuddyLockIn() {
                       color: "#CCC",
                     }}
                   >
-                    {username || "YOU"} {selectedPokemon ? `(${POKEMON_SPRITES[selectedPokemon].name})` : ""}
+                    {username || "YOU"}
                   </span>
                   <span
                     style={{
@@ -917,7 +834,7 @@ export default function BuddyLockIn() {
                 hoverColor="#78C878"
                 glowColor="#68B868"
               >
-                START SESSION
+                ENTER WAITING ROOM
               </PixelButton>
             </div>
           </div>
@@ -998,28 +915,6 @@ export default function BuddyLockIn() {
               }}
             />
 
-            {/* Pokemon Selection */}
-            <p
-              style={{
-                fontFamily: "'Press Start 2P', monospace",
-                fontSize: 8,
-                color: "#E85050",
-                margin: "2px 0 0 0",
-              }}
-            >
-              CHOOSE YOUR BUDDY
-            </p>
-            <div style={{ display: "flex", gap: 6, flexWrap: "wrap", justifyContent: "center" }}>
-              {Object.keys(POKEMON_SPRITES).map((type) => (
-                <PokemonCard
-                  key={type}
-                  type={type}
-                  selected={selectedPokemon}
-                  onClick={() => setSelectedPokemon(type)}
-                />
-              ))}
-            </div>
-
             {/* Action buttons */}
             <div style={{ display: "flex", gap: 16, marginTop: 4 }}>
               <PixelButton
@@ -1041,7 +936,7 @@ export default function BuddyLockIn() {
                 glowColor="#58A8E8"
                 style={{ opacity: joinCode.length === 6 ? 1 : 0.4 }}
               >
-                JOIN
+                ENTER WAITING ROOM
               </PixelButton>
             </div>
           </div>
