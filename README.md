@@ -8,8 +8,7 @@ Buddy is a gamified, multiplayer co-working platform where up to 4 users join a 
 
 ## Demo
 
-*Coming soon*
-
+https://www.youtube.com/watch?v=SI3UrrGbyZo
 ---
 
 ## The Problem
