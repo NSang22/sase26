@@ -11,6 +11,8 @@ import { RoomManager } from './rooms/roomManager.js';
 import { QuizService } from './quiz/quizService.js';
 import { VoiceService, AUDIO_DIR } from './voice/voiceService.js';
 import { EscrowService } from './solana/escrowService.js';
+import { executeAtomicPayout } from './solana/payout.js';
+import { mintSessionReputation } from './solana/mintReputation.js';
 import { ScreenAgent } from './services/screenAgent.js';
 import authRouter from './routes/auth.js';
 
@@ -85,6 +87,19 @@ app.get('/api/rooms/:code/escrow-address', (req, res) => {
   if (!room) return res.status(404).json({ error: 'Room not found' });
   if (room.mode !== 'locked-in') return res.status(400).json({ error: 'Not a Locked In room' });
   res.json({ address: escrowService.getDepositAddress() });
+});
+
+// ── On-chain reputation ───────────────────────────────────────────────────────
+// GET /api/reputation/:walletAddress
+// Returns BUDDY_WIN + BUDDY_XP balances for the waiting room pre-match display.
+app.get('/api/reputation/:walletAddress', async (req, res) => {
+  try {
+    const { getPlayerReputation } = await import('./solana/mintReputation.js');
+    const rep = await getPlayerReputation(req.params.walletAddress);
+    res.json(rep);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
 });
 
 // ── Bet / escrow REST endpoints ───────────────────────────────────────────────
@@ -393,13 +408,52 @@ async function endSession(room) {
     }
   })().catch((err) => console.error('[endSession] DB error:', err.message));
 
-  // ── Background group 2: Solana payout (devnet confirm can take ~20 s) ───────
+  // ── Background group 2: Solana payout + on-chain reputation minting ─────────
+  // Only runs for locked-in mode; fires independently so it never delays recap.
   (async () => {
-    const payoutTx = await escrowService.handleSessionPayout(summary);
-    if (payoutTx) {
-      io.to(roomCode).emit('session_recap_update', { payoutTxSignature: payoutTx });
+    if (summary.mode !== 'locked-in' || !summary.stakeAmount) return;
+
+    // ── Rank-based proportional payout ───────────────────────────────────────
+    const payoutResult = await executeAtomicPayout({
+      players: summary.players.map((p) => ({
+        walletAddress:  p.walletAddress,
+        compositeScore: p.sessionScore, // 0–1 composite from room.getSummary()
+      })),
+      totalStakedLamports: summary.stakeAmount * summary.players.length,
+      serverEscrowKeypair: escrowService.serverKeypair,
+    });
+
+    if (payoutResult.success) {
+      io.to(roomCode).emit('session_recap_update', {
+        payoutTxSignature: payoutResult.signature,
+        payouts:           payoutResult.payouts,
+      });
+    } else {
+      console.error('[payout] Failed:', payoutResult.error);
     }
-  })().catch((err) => console.error('[escrow] Payout error:', err.message));
+
+    // ── Mint BUDDY_WIN + BUDDY_XP reputation tokens ───────────────────────────
+    const winMintAddr = process.env.BUDDY_WIN_MINT;
+    const xpMintAddr  = process.env.BUDDY_XP_MINT;
+    if (winMintAddr && xpMintAddr) {
+      const { PublicKey } = await import('@solana/web3.js');
+
+      // Compute player ranks from sessionScore descending
+      const sorted = [...summary.players].sort((a, b) => b.sessionScore - a.sessionScore);
+      let rank = 1;
+      const playersWithRank = sorted.map((p, i) => {
+        if (i > 0 && p.sessionScore < sorted[i - 1].sessionScore) rank = i + 1;
+        return { ...p, rank, focusScore: p.focusPercent };
+      });
+
+      await mintSessionReputation({
+        players:              playersWithRank,
+        mintAuthorityKeypair: escrowService.serverKeypair,
+        winTokenMintAddress:  new PublicKey(winMintAddr),
+        xpTokenMintAddress:   new PublicKey(xpMintAddr),
+      });
+    }
+  })().catch((err) => console.error('[solana] Background Solana error:', err.message));
 
   // ── Background group 3: AI + audio (all three in parallel) ─────────────────
   (async () => {
